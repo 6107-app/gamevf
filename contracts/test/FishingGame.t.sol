@@ -1,3 +1,4 @@
+// 钓鱼游戏测试文档
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -142,4 +143,45 @@ contract FishingGameTest is Test {
         vm.expectRevert(FishingGame.RoomFull.selector);
         game.joinRoom{value: 0.01 ether}(0);
     }
+
+    // ─── startGame 测试 ──────────────────────────────────
+
+    function test_startGame_success() public {
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(player2);
+        game.joinRoom{value: 0.01 ether}(0);
+
+        vm.prank(host);
+        game.startGame(0);
+
+        (, , FishingGame.RoomStatus status, , , , , ,) = game.getRoomInfo(0);
+        assertEq(uint8(status), uint8(FishingGame.RoomStatus.Active));
+    }
+
+    function test_startGame_notHost_reverts() public {
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(player2);
+        game.joinRoom{value: 0.01 ether}(0);
+
+        // player2 不是房主，不能开始
+        vm.prank(player2);
+        vm.expectRevert(FishingGame.NotHost.selector);
+        game.startGame(0);
+    }
+
+    function test_startGame_notEnoughPlayers_reverts() public {
+        // 只有1人（房主），不能开始
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(host);
+        vm.expectRevert(FishingGame.NotEnoughPlayers.selector);
+        game.startGame(0);
+    }
+
+
 }

@@ -1,3 +1,4 @@
+// 模式1: 钓鱼系统
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -63,6 +64,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     error RoomFull();
     error AlreadyInRoom();
     error NotHost();
+    error NotEnoughPlayers();
 
     // ─── createRoom ──────────────────────────────────────
     function createRoom(
@@ -146,5 +148,25 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
         room.totalPot += msg.value;
 
         emit PlayerJoined(roomId, msg.sender);
+    }
+
+    // 房间满4人后，房主可以手动开始游戏
+    // ─── 事件（补充）────────────────────────────────────
+    event GameStarted(uint256 indexed roomId);
+
+    // ─── startGame ───────────────────────────────────────
+    function startGame(uint256 roomId) external {
+        Room storage room = rooms[roomId];
+
+        // 只有房主可以开始
+        if (msg.sender != room.host)           revert NotHost();
+        // 必须是等待状态
+        if (room.status != RoomStatus.Waiting) revert RoomNotWaiting();
+        // 至少2人才能开始（允许不满4人开始）
+        if (room.playerCount < 2) revert NotEnoughPlayers();
+
+        room.status = RoomStatus.Active;
+
+        emit GameStarted(roomId);
     }
 }
