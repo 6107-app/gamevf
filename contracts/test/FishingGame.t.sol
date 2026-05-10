@@ -85,4 +85,61 @@ contract FishingGameTest is Test {
 
         assertEq(game.roomCount(), 2);
     }
+
+    // ─── joinRoom 测试 ───────────────────────────────────
+
+    function test_joinRoom_success() public {
+        // 房主创建房间
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        // player2 加入
+        vm.prank(player2);
+        game.joinRoom{value: 0.01 ether}(0);
+
+        (, , , uint8 playerCount, , uint256 totalPot, , ,) = game.getRoomInfo(0);
+
+        assertEq(playerCount, 2);
+        assertEq(totalPot, 0.02 ether);
+    }
+
+    function test_joinRoom_wrongFee_reverts() public {
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(player2);
+        vm.expectRevert(FishingGame.IncorrectEntryFee.selector);
+        game.joinRoom{value: 0.005 ether}(0);
+    }
+
+    function test_joinRoom_alreadyInRoom_reverts() public {
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        // host 再次尝试加入同一房间
+        vm.prank(host);
+        vm.expectRevert(FishingGame.AlreadyInRoom.selector);
+        game.joinRoom{value: 0.01 ether}(0);
+    }
+
+    function test_joinRoom_roomFull_reverts() public {
+        address p3 = makeAddr("player3");
+        address p4 = makeAddr("player4");
+        address p5 = makeAddr("player5");
+        vm.deal(p3, 1 ether);
+        vm.deal(p4, 1 ether);
+        vm.deal(p5, 1 ether);
+
+        vm.prank(host);
+        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(player2); game.joinRoom{value: 0.01 ether}(0);
+        vm.prank(p3);      game.joinRoom{value: 0.01 ether}(0);
+        vm.prank(p4);      game.joinRoom{value: 0.01 ether}(0);
+
+        // 第5个人加入应该失败
+        vm.prank(p5);
+        vm.expectRevert(FishingGame.RoomFull.selector);
+        game.joinRoom{value: 0.01 ether}(0);
+    }
 }

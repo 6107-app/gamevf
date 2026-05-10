@@ -125,4 +125,26 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
             room.host
         );
     }
+
+    // ─── joinRoom ────────────────────────────────────────
+    function joinRoom(uint256 roomId) external payable nonReentrant {
+        Room storage room = rooms[roomId];
+
+        // 检查
+        if (room.status != RoomStatus.Waiting) revert RoomNotWaiting();
+        if (room.playerCount >= 4)             revert RoomFull();
+        if (msg.value != room.entryFee)        revert IncorrectEntryFee();
+
+        // 检查是否已在房间
+        for (uint8 i = 0; i < room.playerCount; i++) {
+            if (room.players[i] == msg.sender) revert AlreadyInRoom();
+        }
+
+        // 加入房间
+        room.players[room.playerCount] = msg.sender;
+        room.playerCount++;
+        room.totalPot += msg.value;
+
+        emit PlayerJoined(roomId, msg.sender);
+    }
 }
