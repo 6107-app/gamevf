@@ -1,18 +1,29 @@
-// 钓鱼游戏测试文档
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/FishingGame.sol";
 
-// ─── Mock VRF Coordinator ────────────────────────────
+// ─── Mock VRF Coordinator ───────────────────────────────
 contract MockVRFCoordinator {
     uint256 private _reqId;
-    
+    mapping(uint256 => address) private _consumers;
+
     function requestRandomWords(
         VRFV2PlusClient.RandomWordsRequest calldata
     ) external returns (uint256) {
-        return ++_reqId;
+        _reqId++;
+        _consumers[_reqId] = msg.sender;
+        return _reqId;
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) external {
+        address consumer = _consumers[requestId];
+        require(consumer != address(0), "request not found");
+        (bool success,) = consumer.call(
+            abi.encodeWithSignature("rawFulfillRandomWords(uint256,uint256[])", requestId, randomWords)
+        );
+        require(success, "fulfillment failed");
     }
 
     // 模拟VRF回调：手动触发 fulfillRandomWords
@@ -25,35 +36,38 @@ contract MockVRFCoordinator {
     }
 }
 
-// ─── 测试合约 ────────────────────────────────────────────
+// ─── Tests ──────────────────────────────────────────────
 contract FishingGameTest is Test {
     FishingGame public game;
     MockVRFCoordinator public mockVRF;
 
-    address public host   = makeAddr("host");
+    address public host    = makeAddr("host");
     address public player2 = makeAddr("player2");
+    address public player3 = makeAddr("player3");
+    address public player4 = makeAddr("player4");
+
+    uint256 constant BRONZE_FEE = 0.01 ether;
 
     function setUp() public {
         mockVRF = new MockVRFCoordinator();
         game = new FishingGame(
-        address(mockVRF),
-        bytes32(0), // keyHash（测试用假值）
-        1           // subscriptionId（测试用假值）
+            address(mockVRF),
+            bytes32(uint256(1)),
+            1
         );
 
-        // 给测试账户一些 ETH
         vm.deal(host, 10 ether);
         vm.deal(player2, 10 ether);
+        vm.deal(player3, 10 ether);
+        vm.deal(player4, 10 ether);
     }
 
-    // ─── createRoom 测试 ─────────────────────────────────
+    // ─── createRoom ─────────────────────────────────────
 
     function test_createRoom_success() public {
         vm.prank(host);
-        uint256 roomId = game.createRoom{value: 0.01 ether}(
-            FishingGame.RoomTier.Bronze,
-            true,
-            false
+        uint256 roomId = game.createRoom{value: BRONZE_FEE}(
+            FishingGame.RoomTier.Bronze, true, false
         );
 
         assertEq(roomId, 0);
@@ -74,200 +88,255 @@ contract FishingGameTest is Test {
         assertEq(uint8(tier), uint8(FishingGame.RoomTier.Bronze));
         assertEq(uint8(status), uint8(FishingGame.RoomStatus.Waiting));
         assertEq(playerCount, 1);
-        assertEq(entryFee, 0.01 ether);
-        assertEq(totalPot, 0.01 ether);
+        assertEq(entryFee, BRONZE_FEE);
+        assertEq(totalPot, BRONZE_FEE);
         assertTrue(isPublic);
         assertEq(roomHost, host);
     }
 
     function test_createRoom_wrongFee_reverts() public {
         vm.prank(host);
-        vm.expectRevert(FishingGame.IncorrectEntryFee.selector);
-        game.createRoom{value: 0.005 ether}(
-            FishingGame.RoomTier.Bronze,
-            true,
-            false
-        );
+        vm.expectRevert(FishingGame.IncorrectFee.selector);
+        game.createRoom{value: 0.005 ether}(FishingGame.RoomTier.Bronze, true, false);
     }
 
     function test_createRoom_incrementsRoomCount() public {
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         vm.prank(player2);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         assertEq(game.roomCount(), 2);
     }
 
-    // ─── joinRoom 测试 ───────────────────────────────────
+    // ─── joinRoom ───────────────────────────────────────
 
     function test_joinRoom_success() public {
-        // 房主创建房间
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
-        // player2 加入
         vm.prank(player2);
-        game.joinRoom{value: 0.01 ether}(0);
+        game.joinRoom{value: BRONZE_FEE}(0);
 
-        (, , , uint8 playerCount, , uint256 totalPot, , ,) = game.getRoomInfo(0);
-
+        (,,, uint8 playerCount,, uint256 totalPot,,,) = game.getRoomInfo(0);
         assertEq(playerCount, 2);
-        assertEq(totalPot, 0.02 ether);
+        assertEq(totalPot, BRONZE_FEE * 2);
     }
 
     function test_joinRoom_wrongFee_reverts() public {
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         vm.prank(player2);
-        vm.expectRevert(FishingGame.IncorrectEntryFee.selector);
+        vm.expectRevert(FishingGame.IncorrectFee.selector);
         game.joinRoom{value: 0.005 ether}(0);
     }
 
     function test_joinRoom_alreadyInRoom_reverts() public {
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
-        // host 再次尝试加入同一房间
         vm.prank(host);
         vm.expectRevert(FishingGame.AlreadyInRoom.selector);
-        game.joinRoom{value: 0.01 ether}(0);
+        game.joinRoom{value: BRONZE_FEE}(0);
     }
 
     function test_joinRoom_roomFull_reverts() public {
-        address p3 = makeAddr("player3");
-        address p4 = makeAddr("player4");
         address p5 = makeAddr("player5");
-        vm.deal(p3, 1 ether);
-        vm.deal(p4, 1 ether);
         vm.deal(p5, 1 ether);
 
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
-        vm.prank(player2); game.joinRoom{value: 0.01 ether}(0);
-        vm.prank(p3);      game.joinRoom{value: 0.01 ether}(0);
-        vm.prank(p4);      game.joinRoom{value: 0.01 ether}(0);
+        vm.prank(player2); game.joinRoom{value: BRONZE_FEE}(0);
+        vm.prank(player3); game.joinRoom{value: BRONZE_FEE}(0);
+        vm.prank(player4); game.joinRoom{value: BRONZE_FEE}(0);
 
-        // 第5个人加入应该失败
         vm.prank(p5);
         vm.expectRevert(FishingGame.RoomFull.selector);
-        game.joinRoom{value: 0.01 ether}(0);
+        game.joinRoom{value: BRONZE_FEE}(0);
     }
 
-    // ─── startGame 测试 ──────────────────────────────────
+    // ─── startGame ──────────────────────────────────────
 
     function test_startGame_success() public {
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         vm.prank(player2);
-        game.joinRoom{value: 0.01 ether}(0);
+        game.joinRoom{value: BRONZE_FEE}(0);
 
         vm.prank(host);
         game.startGame(0);
 
-        (, , FishingGame.RoomStatus status, , , , , ,) = game.getRoomInfo(0);
+        (,, FishingGame.RoomStatus status,,,,,,) = game.getRoomInfo(0);
         assertEq(uint8(status), uint8(FishingGame.RoomStatus.Active));
     }
 
     function test_startGame_notHost_reverts() public {
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         vm.prank(player2);
-        game.joinRoom{value: 0.01 ether}(0);
+        game.joinRoom{value: BRONZE_FEE}(0);
 
-        // player2 不是房主，不能开始
         vm.prank(player2);
         vm.expectRevert(FishingGame.NotHost.selector);
         game.startGame(0);
     }
 
     function test_startGame_notEnoughPlayers_reverts() public {
-        // 只有1人（房主），不能开始
         vm.prank(host);
-        game.createRoom{value: 0.01 ether}(FishingGame.RoomTier.Bronze, true, false);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
 
         vm.prank(host);
         vm.expectRevert(FishingGame.NotEnoughPlayers.selector);
         game.startGame(0);
     }
 
-    // ─── 辅助函数：创建并开始游戏 ───────────────────────
-    function _setupActiveRoom() internal returns (uint256 roomId) {
+    // ─── Fishing: cast + VRF ────────────────────────────
+
+    function _setupActiveRoom() internal returns (uint256) {
         vm.prank(host);
-        roomId = game.createRoom{value: 0.01 ether}(
-            FishingGame.RoomTier.Bronze, true, false
-        );
-        vm.prank(player2);
-        game.joinRoom{value: 0.01 ether}(roomId);
+        uint256 roomId = game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(player2); game.joinRoom{value: BRONZE_FEE}(roomId);
+        vm.prank(player3); game.joinRoom{value: BRONZE_FEE}(roomId);
+        vm.prank(player4); game.joinRoom{value: BRONZE_FEE}(roomId);
+
         vm.prank(host);
         game.startGame(roomId);
+
+        return roomId;
     }
 
-    // ─── castRod 测试 ────────────────────────────────────
+    function _makeRandomWords3() internal pure returns (uint256[] memory) {
+        uint256[] memory rw = new uint256[](3);
+        rw[0] = 42;
+        rw[1] = 99999;
+        rw[2] = 75;
+        return rw;
+    }
 
-    function test_castRod_firstCast_success() public {
+    function _makeRandomWords5() internal pure returns (uint256[] memory) {
+        uint256[] memory rw = new uint256[](5);
+        rw[0] = 50; rw[1] = 88888; rw[2] = 80; rw[3] = 12345; rw[4] = 67890;
+        return rw;
+    }
+
+    function test_cast_success() public {
+        uint256 roomId = _setupActiveRoom();
+        vm.prank(host);
+        game.cast(roomId);
+    }
+
+    function test_cast_notActive_reverts() public {
+        vm.prank(host);
+        game.createRoom{value: BRONZE_FEE}(FishingGame.RoomTier.Bronze, true, false);
+
+        vm.prank(host);
+        vm.expectRevert(FishingGame.RoomNotActive.selector);
+        game.cast(0);
+    }
+
+    function test_castAndFulfill() public {
         uint256 roomId = _setupActiveRoom();
 
-        // 第一次抛竿不需要额外付费
         vm.prank(host);
-        game.castRod{value: 0}(roomId);
+        game.cast(roomId);
 
-        // 检查 playerState
-        (uint8 castCount, bool lockedIn, uint256 pendingReqId) = 
-            game.playerStates(roomId, host);
+        mockVRF.fulfillRandomWords(1, _makeRandomWords3());
 
-        assertEq(castCount, 1);
-        assertFalse(lockedIn);
-        assertEq(pendingReqId, 1); // 第一个requestId
+        (,, uint8 rarity, uint256 weight,, uint256 score,,) = game.getPlayerInfo(roomId, 0);
+        assertGt(weight, 0);
+        assertGt(score, 0);
     }
 
-    function test_castRod_gameNotActive_reverts() public {
-        // 房间还在Waiting状态
-        vm.prank(host);
-        uint256 roomId = game.createRoom{value: 0.01 ether}(
-            FishingGame.RoomTier.Bronze, true, false
-        );
-        vm.prank(player2);
-        game.joinRoom{value: 0.01 ether}(roomId);
+    // ─── lockIn ─────────────────────────────────────────
 
-        vm.prank(host);
-        vm.expectRevert(FishingGame.GameNotActive.selector);
-        game.castRod{value: 0}(roomId);
-    }
-
-    function test_castRod_notInRoom_reverts() public {
+    function test_lockIn() public {
         uint256 roomId = _setupActiveRoom();
 
-        address stranger = makeAddr("stranger");
-        vm.prank(stranger);
-        vm.expectRevert(FishingGame.NotInRoom.selector);
-        game.castRod{value: 0}(roomId);
+        vm.prank(host);
+        game.cast(roomId);
+        mockVRF.fulfillRandomWords(1, _makeRandomWords3());
+
+        vm.prank(host);
+        game.lockIn(roomId);
+
+        (,FishingGame.PlayerStatus status,,,,,,) = game.getPlayerInfo(roomId, 0);
+        assertEq(uint8(status), 1); // LockedIn
     }
 
-    function test_castRod_recast_requiresFee() public {
+    function test_lockIn_noFish_reverts() public {
         uint256 roomId = _setupActiveRoom();
 
-        // 第一次抛竿
         vm.prank(host);
-        game.castRod{value: 0}(roomId);
-
-        // 模拟VRF回调
-        uint256[] memory randomWords = new uint256[](3);
-        randomWords[0] = 12345;
-        randomWords[1] = 67890;
-        randomWords[2] = 11111;
-        mockVRF.fulfillRandomWords(address(game), 1, randomWords);
-
-        // 第二次抛竿（re-cast）需要付费
-        vm.prank(host);
-        vm.expectRevert(FishingGame.IncorrectEntryFee.selector);
-        game.castRod{value: 0}(roomId); // 没付钱，应该revert
+        vm.expectRevert(FishingGame.NoFishCaught.selector);
+        game.lockIn(roomId);
     }
 
+    // ─── recast ─────────────────────────────────────────
 
+    function test_recast() public {
+        uint256 roomId = _setupActiveRoom();
+
+        vm.prank(host);
+        game.cast(roomId);
+        mockVRF.fulfillRandomWords(1, _makeRandomWords3());
+
+        vm.prank(host);
+        game.recast{value: BRONZE_FEE}(roomId);
+        mockVRF.fulfillRandomWords(2, _makeRandomWords5());
+
+        (,,,,, uint256 score, uint256 recastCount,) = game.getPlayerInfo(roomId, 0);
+        assertEq(recastCount, 1);
+        assertGt(score, 0);
+    }
+
+    function test_recast_maxReached_reverts() public {
+        uint256 roomId = _setupActiveRoom();
+
+        vm.prank(host);
+        game.cast(roomId);
+        mockVRF.fulfillRandomWords(1, _makeRandomWords3());
+
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(host);
+            game.recast{value: BRONZE_FEE}(roomId);
+            mockVRF.fulfillRandomWords(i + 2, _makeRandomWords5());
+        }
+
+        vm.prank(host);
+        vm.expectRevert(FishingGame.MaxRecastReached.selector);
+        game.recast{value: BRONZE_FEE}(roomId);
+    }
+
+    // ─── Full game settlement ───────────────────────────
+
+    function test_fullGameSettlement() public {
+        uint256 roomId = _setupActiveRoom();
+        uint256 reqId = 1;
+
+        address[4] memory players = [host, player2, player3, player4];
+        for (uint256 i = 0; i < 4; i++) {
+            vm.prank(players[i]);
+            game.cast(roomId);
+
+            uint256[] memory rw = new uint256[](3);
+            rw[0] = 10 + i * 20;
+            rw[1] = 50000 + i * 10000;
+            rw[2] = 70 + i * 5;
+            mockVRF.fulfillRandomWords(reqId++, rw);
+        }
+
+        for (uint256 i = 0; i < 4; i++) {
+            vm.prank(players[i]);
+            game.lockIn(roomId);
+        }
+
+        (,, FishingGame.RoomStatus status,,,,,,) = game.getRoomInfo(roomId);
+        assertEq(uint8(status), uint8(FishingGame.RoomStatus.Finished));
+    }
 }
