@@ -47,6 +47,18 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     }
     mapping(uint256 => VRFRequest) public vrfRequests; // requestId => VRFRequest
 
+    // ─── 玩家回合状态 ────────────────────────────────────
+    struct PlayerState {
+        uint8   castCount;        // 已投注次数（1-4）
+        bool    lockedIn;         // 是否已锁定结果
+        uint256 pendingRequestId; // 等待VRF回调的requestId（0=无）
+    }
+    mapping(uint256 => mapping(address => PlayerState)) public playerStates;
+    // roomId => player => PlayerState
+
+    // ─── 事件 ────────────────────────────────────────────
+    event CastRod(uint256 indexed roomId, address indexed player, uint256 requestId);
+
     // ─── 房间等级对应费用（wei）─────────────────────────
     mapping(RoomTier => uint256) public entryFees;
     mapping(RoomTier => uint256) public recastFees;
@@ -85,6 +97,11 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     error AlreadyInRoom();
     error NotHost();
     error NotEnoughPlayers();
+    error GameNotActive();
+    error PlayerLockedIn();
+    error MaxCastsReached();
+    error PendingVRF();
+    error NotInRoom();
 
     // ─── createRoom ──────────────────────────────────────
     function createRoom(
@@ -120,7 +137,11 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     function fulfillRandomWords(
         uint256 requestId,
         uint256[] calldata randomWords
-    ) internal override {}
+    ) internal override {
+        VRFRequest memory req = vrfRequests[requestId];  // ← 这行报错
+        PlayerState storage ps = playerStates[req.roomId][req.player];
+        ps.pendingRequestId = 0;
+    }
 
     // ─── 读取房间基础信息 ─────────────────────────────────
     function getRoomInfo(uint256 roomId) external view returns (
@@ -188,5 +209,59 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
         room.status = RoomStatus.Active;
 
         emit GameStarted(roomId);
+    }
+
+    // ─── castRod（抛竿，触发VRF）────────────────────────
+    function castRod(uint256 roomId) external payable nonReentrant {
+        Room storage room = rooms[roomId];
+        PlayerState storage ps = playerStates[roomId][msg.sender];
+
+        // 检查游戏状态
+        if (room.status != RoomStatus.Active) revert GameNotActive();
+        if (ps.lockedIn)                      revert PlayerLockedIn();
+        if (ps.castCount >= 4)                revert MaxCastsReached();
+        if (ps.pendingRequestId != 0)         revert PendingVRF();
+
+        // 检查玩家是否在房间
+        bool inRoom = false;
+        for (uint8 i = 0; i < room.playerCount; i++) {
+            if (room.players[i] == msg.sender) { inRoom = true; break; }
+        }
+        if (!inRoom) revert NotInRoom();
+
+        // 第一次抛竿不需要额外付费（入场时已付）
+        // Re-cast（第2次起）需要追加费用
+        if (ps.castCount > 0) {
+            if (msg.value != room.recastFee) revert IncorrectEntryFee();
+            room.totalPot += msg.value;
+        } else {
+            if (msg.value != 0) revert IncorrectEntryFee();
+        }
+
+        ps.castCount++;
+
+        // 请求VRF随机数
+        VRFV2PlusClient.RandomWordsRequest memory req = VRFV2PlusClient.RandomWordsRequest({
+            keyHash:             s_keyHash,
+            subId:               s_subscriptionId,
+            requestConfirmations: REQUEST_CONFIRMATIONS,
+            callbackGasLimit:    CALLBACK_GAS_LIMIT,
+            numWords:            NUM_WORDS,
+            extraArgs:           VRFV2PlusClient._argsToBytes(
+                                    VRFV2PlusClient.ExtraArgsV1({ nativePayment: false })
+                                )
+        });
+
+        uint256 requestId = i_vrfCoordinator.requestRandomWords(req);
+
+        // 记录请求
+        ps.pendingRequestId = requestId;
+        vrfRequests[requestId] = VRFRequest({
+            roomId:    roomId,
+            player:    msg.sender,
+            castCount: ps.castCount
+        });
+
+        emit CastRod(roomId, msg.sender, requestId);
     }
 }
