@@ -99,4 +99,30 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
         uint256 requestId,
         uint256[] calldata randomWords
     ) internal override {}
+
+    // ─── 读取房间基础信息 ─────────────────────────────────
+    function getRoomInfo(uint256 roomId) external view returns (
+        uint256 id,
+        RoomTier tier,
+        RoomStatus status,
+        uint8 playerCount,
+        uint256 entryFee,
+        uint256 totalPot,
+        bool isPublic,
+        bool isLivestream,
+        address host
+    ) {
+        Room storage room = rooms[roomId];
+        return (
+            room.roomId,
+            room.tier,
+            room.status,
+            room.playerCount,
+            room.entryFee,
+            room.totalPot,
+            room.isPublic,
+            room.isLivestream,
+            room.host
+        );
+    }
 }
