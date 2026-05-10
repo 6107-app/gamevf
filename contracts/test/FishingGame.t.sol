@@ -47,6 +47,8 @@ contract FishingGameTest is Test {
     address public player4 = makeAddr("player4");
 
     uint256 constant BRONZE_FEE = 0.01 ether;
+    
+    receive() external payable {}
 
     function setUp() public {
         mockVRF = new MockVRFCoordinator();
