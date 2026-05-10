@@ -26,7 +26,11 @@ contract FishingGameTest is Test {
 
     function setUp() public {
         mockVRF = new MockVRFCoordinator();
-        game = new FishingGame(address(mockVRF));
+        game = new FishingGame(
+        address(mockVRF),
+        bytes32(0), // keyHash（测试用假值）
+        1           // subscriptionId（测试用假值）
+        );
 
         // 给测试账户一些 ETH
         vm.deal(host, 10 ether);

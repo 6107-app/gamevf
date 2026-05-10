@@ -31,6 +31,22 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     uint256 public roomCount;
     mapping(uint256 => Room) public rooms;
 
+    // ─── VRF 配置 ───
+    IVRFCoordinatorV2Plus private immutable i_vrfCoordinator;
+    bytes32 public s_keyHash;
+    uint256 public s_subscriptionId;
+    uint16  public constant REQUEST_CONFIRMATIONS = 3;
+    uint32  public constant CALLBACK_GAS_LIMIT    = 300_000;
+    uint32  public constant NUM_WORDS             = 3; // 鱼类、重量、稀有度各一个
+
+    // ─── VRF 请求追踪 ───
+    struct VRFRequest {
+        uint256 roomId;
+        address player;
+        uint8   castCount; // 第几次抛竿
+    }
+    mapping(uint256 => VRFRequest) public vrfRequests; // requestId => VRFRequest
+
     // ─── 房间等级对应费用（wei）─────────────────────────
     mapping(RoomTier => uint256) public entryFees;
     mapping(RoomTier => uint256) public recastFees;
@@ -40,16 +56,20 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
     event PlayerJoined(uint256 indexed roomId, address indexed player);
 
     // ─── 构造函数 ────────────────────────────────────────
-    constructor(address vrfCoordinator) 
-        VRFConsumerBaseV2Plus(vrfCoordinator) 
-    {
-        // 设置各等级入场费
+    constructor(
+        address vrfCoordinator,
+        bytes32 keyHash,
+        uint256 subscriptionId
+    ) VRFConsumerBaseV2Plus(vrfCoordinator) {
+        i_vrfCoordinator  = IVRFCoordinatorV2Plus(vrfCoordinator);
+        s_keyHash         = keyHash;
+        s_subscriptionId  = subscriptionId;
+
         entryFees[RoomTier.Bronze]  = 0.01 ether;
         entryFees[RoomTier.Silver]  = 0.05 ether;
         entryFees[RoomTier.Gold]    = 0.1 ether;
         entryFees[RoomTier.Diamond] = 0.5 ether;
 
-        // re-cast费用与入场费相同
         recastFees[RoomTier.Bronze]  = 0.01 ether;
         recastFees[RoomTier.Silver]  = 0.05 ether;
         recastFees[RoomTier.Gold]    = 0.1 ether;
