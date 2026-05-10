@@ -55,6 +55,45 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard{
         recastFees[RoomTier.Diamond] = 0.5 ether;
     }
 
+    // 创建房间
+    // ─── 错误定义 ────────────────────────────────────────
+    error InvalidTier();
+    error IncorrectEntryFee();
+    error RoomNotWaiting();
+    error RoomFull();
+    error AlreadyInRoom();
+    error NotHost();
+
+    // ─── createRoom ──────────────────────────────────────
+    function createRoom(
+        RoomTier tier,
+        bool isPublic,
+        bool isLivestream
+    ) external payable returns (uint256 roomId) {
+        // 检查入场费是否正确
+        if (msg.value != entryFees[tier]) revert IncorrectEntryFee();
+
+        roomId = roomCount++;
+
+        Room storage room = rooms[roomId];
+        room.roomId      = roomId;
+        room.tier        = tier;
+        room.status      = RoomStatus.Waiting;
+        room.entryFee    = entryFees[tier];
+        room.recastFee   = recastFees[tier];
+        room.isPublic    = isPublic;
+        room.isLivestream = isLivestream;
+        room.host        = msg.sender;
+
+        // 房主自动成为第一个玩家
+        room.players[0]  = msg.sender;
+        room.playerCount = 1;
+        room.totalPot    = msg.value;
+
+        emit RoomCreated(roomId, msg.sender, tier, isPublic);
+        emit PlayerJoined(roomId, msg.sender);
+    }
+
     // ─── VRF回调（暂时留空）─────────────────────────────
     function fulfillRandomWords(
         uint256 requestId,
