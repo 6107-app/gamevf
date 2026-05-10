@@ -25,6 +25,15 @@ contract MockVRFCoordinator {
         );
         require(success, "fulfillment failed");
     }
+
+    // 模拟VRF回调：手动触发 fulfillRandomWords
+    function fulfillRandomWords(
+        address gameContract,
+        uint256 requestId,
+        uint256[] memory randomWords
+    ) external {
+        FishingGame(gameContract).rawFulfillRandomWords(requestId, randomWords);
+    }
 }
 
 // ─── Tests ──────────────────────────────────────────────
