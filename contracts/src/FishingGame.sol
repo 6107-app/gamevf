@@ -80,7 +80,6 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     mapping(RoomTier => uint256) public entryFees;
     mapping(RoomTier => uint256) public recastFees;
 
-    address public owner;
 
     // ─── Custom Errors ──────────────────────────────────
     error InvalidTier();
@@ -116,7 +115,6 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         i_vrfCoordinator = IVRFCoordinatorV2Plus(vrfCoordinator);
         s_keyHash = keyHash;
         s_subscriptionId = subscriptionId;
-        owner = msg.sender;
 
         entryFees[RoomTier.Bronze]  = 0.01 ether;
         entryFees[RoomTier.Silver]  = 0.05 ether;
@@ -368,7 +366,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             payable(winners[i]).transfer(prizes[i]);
         }
 
-        payable(owner).transfer(platformFee);
+        payable(owner()).transfer(platformFee);
 
         uint256[4] memory finalScores;
         for (uint256 i = 0; i < pc; i++) {
@@ -380,9 +378,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
 
     // ─── Internal Helpers ───────────────────────────────
 
-    function _rollRarity(uint8 roll, uint256 modifier) internal pure returns (Rarity) {
+    function _rollRarity(uint8 roll, uint256 skillMod) internal pure returns (Rarity) {
         // Probabilities: Common 55%, Rare 25%, SuperRare 13%, Epic 6%, Legendary 1%
-        uint256 adjusted = uint256(roll) * 10000 / modifier;
+        uint256 adjusted = uint256(roll) * 10000 / skillMod;
         if (adjusted >= 99) return Rarity.Legendary;   // 1%
         if (adjusted >= 93) return Rarity.Epic;         // 6%
         if (adjusted >= 80) return Rarity.SuperRare;    // 13%
