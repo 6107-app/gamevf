@@ -43,16 +43,28 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         bool isLivestream;
         address host;
         uint256 createdAt;
+        uint256 gameStartedAt;
         uint256 lockedInCount;
         mapping(uint256 => Player) playerData;
         mapping(address => uint256) playerIndex;
         mapping(address => bool) isPlayer;
     }
 
+    // ─── NFT Rod Interface ─────────────────────────────
+    interface IFishingRod {
+        function getRodBonus(uint256 tokenId) external view returns (
+            uint256 speedBonus,   // time reduction in bps (e.g. 1500 = -15%)
+            uint256 weightBonus,  // weight increase in bps (e.g. 2000 = +20%)
+            uint256 luckBonus     // rarity boost in bps (e.g. 1000 = +10%)
+        );
+    }
+
     // ─── Constants ──────────────────────────────────────
     uint256 public constant MAX_PLAYERS = 4;
     uint256 public constant MAX_RECAST = 3;
     uint256 public constant PLATFORM_FEE_BPS = 500;
+    uint256 public constant RECAST_FLOOR_BPS = 7000;  // recast guarantees >= 70% of previous score
+    uint256 public constant GAME_TIMEOUT = 180;        // 180 seconds auto lock-in
 
     uint256[5] public RARITY_SCORES = [1, 2, 4, 8, 16];
     uint256[4] public TIME_THRESHOLDS = [60, 90, 120, type(uint256).max];
@@ -80,6 +92,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     mapping(RoomTier => uint256) public entryFees;
     mapping(RoomTier => uint256) public recastFees;
 
+    address public owner;
+    IFishingRod public rodContract;
 
     // ─── Custom Errors ──────────────────────────────────
     error InvalidTier();
@@ -94,6 +108,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     error NotFishing();
     error MaxRecastReached();
     error NoFishCaught();
+    error GameNotTimedOut();
+    error PlayerAlreadyLockedIn();
 
     // ─── Events ─────────────────────────────────────────
     event RoomCreated(uint256 indexed roomId, address indexed host, RoomTier tier, bool isPublic, uint256 entryFee, uint256 timestamp);
@@ -200,6 +216,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         if (room.playerCount < 2) revert NotEnoughPlayers();
 
         room.status = RoomStatus.Active;
+        room.gameStartedAt = block.timestamp;
         emit GameStarted(roomId, block.timestamp);
     }
 
@@ -282,6 +299,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         Room storage room = rooms[req.roomId];
         Player storage player = room.playerData[req.playerIndex];
 
+        uint256 previousScore = player.currentFish.score;
+
         uint8 rarityRoll = uint8(randomWords[0] % 100);
         Rarity rarity = _rollRarity(rarityRoll, player.skillModifier);
         uint256 baseWeight = _rollWeight(randomWords[1], rarity);
@@ -306,6 +325,14 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         }
 
         player.currentFish.score = _calculateScore(player);
+
+        // Recast floor: new score must be >= 70% of previous score
+        if (req.isRecast && previousScore > 0) {
+            uint256 floor = (previousScore * RECAST_FLOOR_BPS) / 10000;
+            if (player.currentFish.score < floor) {
+                player.currentFish.score = floor;
+            }
+        }
 
         emit FishCaught(
             req.roomId, player.addr,
@@ -374,6 +401,37 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         }
 
         emit GameSettled(roomId, winners, prizes, finalScores);
+    }
+
+    // ─── Timeout ────────────────────────────────────────
+
+    function forceComplete(uint256 roomId) external {
+        Room storage room = rooms[roomId];
+        if (room.status != RoomStatus.Active) revert RoomNotActive();
+        if (block.timestamp < room.gameStartedAt + GAME_TIMEOUT) revert GameNotTimedOut();
+
+        for (uint256 i = 0; i < room.playerCount; i++) {
+            Player storage player = room.playerData[i];
+            if (player.status == PlayerStatus.Fishing) {
+                if (player.currentFish.weight > 0) {
+                    player.currentFish.score = _calculateScore(player);
+                }
+                player.status = PlayerStatus.LockedIn;
+                room.lockedInCount++;
+                emit PlayerLockedIn(roomId, player.addr, player.currentFish.score);
+            }
+        }
+
+        if (room.lockedInCount == room.playerCount) {
+            _settleGame(roomId);
+        }
+    }
+
+    // ─── Rod Contract ───────────────────────────────────
+
+    function setRodContract(address _rodContract) external {
+        require(msg.sender == owner, "Only owner");
+        rodContract = IFishingRod(_rodContract);
     }
 
     // ─── Internal Helpers ───────────────────────────────
