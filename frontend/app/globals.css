@@ -1,26 +1,127 @@
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Noto+Serif+SC:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── 品牌色 ── */
+  --coral:        #FF7B6B;
+  --coral-light:  #FFB3A9;
+  --coral-dark:   #E85D4A;
+
+  /* ── 中性色 ── */
+  --cream:        #FDF8F0;
+  --cream-dark:   #F5EDD8;
+  --brown:        #5C3D2E;
+  --brown-light:  #8B6355;
+
+  /* ── 等级色 ── */
+  --bronze:       #C8956C;
+  --silver:       #A8B8C8;
+  --gold:         #E8C547;
+  --diamond:      #B39DDB;
+
+  /* ── 语义色 ── */
+  --mint:         #E8F5E9;
+  --mint-dark:    #A5D6A7;
+  --yellow-soft:  #FFF9C4;
+  --blue-baby:    #E3F2FD;
+
+  /* ── 字体 ── */
+  --font-main:    'Nunito', sans-serif;
+  --font-serif:   'Noto Serif SC', serif;
+
+  /* ── 阴影 ── */
+  --shadow-card:  0 4px 24px rgba(92, 61, 46, 0.08);
+  --shadow-hover: 0 8px 32px rgba(92, 61, 46, 0.16);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-main);
+  background-color: var(--cream);
+  color: var(--brown);
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ── 滚动条美化 ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--cream-dark); }
+::-webkit-scrollbar-thumb { background: var(--coral-light); border-radius: 3px; }
+
+/* ── 通用卡片 ── */
+.card {
+  background: white;
+  border-radius: 24px;
+  box-shadow: var(--shadow-card);
+}
+
+/* ── 按钮基础 ── */
+.btn-primary {
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
+  color: white;
+  border: none;
+  border-radius: 16px;
+  padding: 14px 28px;
+  font-family: var(--font-main);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 12px rgba(255, 123, 107, 0.35);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(255, 123, 107, 0.45);
+}
+.btn-primary:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 8px rgba(255, 123, 107, 0.3);
+}
+
+.btn-secondary {
+  background: white;
+  color: var(--brown);
+  border: 2px solid var(--cream-dark);
+  border-radius: 16px;
+  padding: 14px 28px;
+  font-family: var(--font-main);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.btn-secondary:hover {
+  transform: translateY(-2px);
+  border-color: var(--coral-light);
+}
+
+/* ── 弹跳动画 ── */
+@keyframes bounce-in {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 123, 107, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(255, 123, 107, 0); }
+}
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-bounce-in  { animation: bounce-in 0.4s ease forwards; }
+.animate-float      { animation: float 3s ease-in-out infinite; }
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-marquee    { animation: marquee 30s linear infinite; }
