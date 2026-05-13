@@ -5,7 +5,7 @@ import Navbar from "@/components/ui/Navbar";
 
 const MOCK_PLAYERS = [
   { address: "0xEf4b...3D2E", ens: "sakura.eth", rod: "Speed Rod +2", joined: true },
-  { address: "0xEb0A...3324", ens: "vitalik.eth", rod: "Lucky Rod", joined: false },
+  { address: "0xEb0A...3324", ens: "vitalik.eth", rod: "Lucky Rod", joined: true },
   { address: "", ens: "", rod: "", joined: false },
   { address: "", ens: "", rod: "", joined: false },
 ];
