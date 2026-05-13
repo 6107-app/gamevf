@@ -113,7 +113,7 @@ export default function Home() {
             ) : filtered.map(room => (
               <RoomCard key={room.roomId} {...room}
                 onJoin={() => alert(`加入房间 ${room.name}`)}
-                onWatch={() => alert(`观看直播 ${room.name}`)}
+                onWatch={() => router.push(`/spectator/${room.roomId}`)}
               />
             ))}
           </div>

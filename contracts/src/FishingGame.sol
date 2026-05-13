@@ -5,6 +5,15 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol";
 import "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.sol";
 
+// ─── NFT Rod Interface ─────────────────────────────────
+interface IFishingRod {
+    function getRodBonus(uint256 tokenId) external view returns (
+        uint256 speedBonus,   // time reduction in bps (e.g. 1500 = -15%)
+        uint256 weightBonus,  // weight increase in bps (e.g. 2000 = +20%)
+        uint256 luckBonus     // rarity boost in bps (e.g. 1000 = +10%)
+    );
+}
+
 contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
 
     // ─── Enums ──────────────────────────────────────────
@@ -50,15 +59,6 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         mapping(address => bool) isPlayer;
     }
 
-    // ─── NFT Rod Interface ─────────────────────────────
-    interface IFishingRod {
-        function getRodBonus(uint256 tokenId) external view returns (
-            uint256 speedBonus,   // time reduction in bps (e.g. 1500 = -15%)
-            uint256 weightBonus,  // weight increase in bps (e.g. 2000 = +20%)
-            uint256 luckBonus     // rarity boost in bps (e.g. 1000 = +10%)
-        );
-    }
-
     // ─── Constants ──────────────────────────────────────
     uint256 public constant MAX_PLAYERS = 4;
     uint256 public constant MAX_RECAST = 3;
@@ -92,7 +92,6 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     mapping(RoomTier => uint256) public entryFees;
     mapping(RoomTier => uint256) public recastFees;
 
-    address public owner;
     IFishingRod public rodContract;
 
     // ─── Custom Errors ──────────────────────────────────
@@ -430,7 +429,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     // ─── Rod Contract ───────────────────────────────────
 
     function setRodContract(address _rodContract) external {
-        require(msg.sender == owner, "Only owner");
+        require(msg.sender == owner(), "Only owner");
         rodContract = IFishingRod(_rodContract);
     }
 
