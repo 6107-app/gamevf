@@ -1,4 +1,5 @@
 "use client";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import AnnouncementBar from "@/components/ui/AnnouncementBar";
 import RoomCard from "@/components/lobby/RoomCard";
@@ -26,6 +27,7 @@ const TIER_FILTER_COLORS: Record<FilterTier, string> = {
 export default function Home() {
   const [filter, setFilter] = useState<FilterTier>("全部");
   const [liveOnly, setLiveOnly] = useState(false);
+  const router = useRouter();
 
   const filtered = MOCK_ROOMS.filter(r => {
     if (filter !== "全部" && r.tier !== filter) return false;
@@ -117,11 +119,12 @@ export default function Home() {
           </div>
 
           {/* 创建房间按钮 */}
-          <button className="btn-primary" style={{
+          <button className="btn-primary" onClick={() => router.push("/create-room")} style={{
             width: "100%", marginTop: "20px",
             height: "56px", fontSize: "16px",
             borderRadius: "20px",
           }}>
+            
             🚩 创建新房间
           </button>
         </div>
