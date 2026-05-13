@@ -10,6 +10,7 @@ interface PlayerResult {
   fishEmoji: string;
   rarity: string;
   score: number;
+  prize: number;
   isMe: boolean;
 }
 
