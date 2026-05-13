@@ -120,6 +120,10 @@ body {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
 }
+@keyframes wiggle {
+  0%, 100% { transform: rotate(-10deg); }
+  50%       { transform: rotate(10deg); }
+}
 
 .animate-bounce-in  { animation: bounce-in 0.4s ease forwards; }
 .animate-float      { animation: float 3s ease-in-out infinite; }

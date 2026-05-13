@@ -1,0 +1,842 @@
+"use client";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+
+// ── 游戏状态枚举 ─────────────────────────────────────────
+type GamePhase =
+  | "waiting_cast"   // 等待抛竿
+  | "waiting_vrf"    // 等待VRF回调
+  | "reeling"        // 收竿Bar
+  | "fish_result"    // 鱼结果展示
+  | "decision"       // 决策：锁定/重投
+  | "dice_roll"      // 骰子动画
+  | "locked"         // 已锁定
+
+type Rarity = "Common" | "Rare" | "SuperRare" | "Epic" | "Legendary";
+
+interface FishResult {
+  name: string;
+  rarity: Rarity;
+  weight: number;
+  score: number;
+  emoji: string;
+}
+
+interface OtherPlayer {
+  ens: string;
+  status: "waiting" | "fishing" | "caught" | "locked";
+  score: number;
+}
+
+// ── 鱼类数据库（Mock）────────────────────────────────────
+const FISH_DB: Record<Rarity, { names: string[]; emoji: string }> = {
+  Common:   { names: ["小鲫鱼", "普通鲤鱼", "小草鱼"],      emoji: "🐟" },
+  Rare:     { names: ["金鲤鱼", "鲈鱼", "鳜鱼"],            emoji: "🐠" },
+  SuperRare:{ names: ["锦鲤", "翻车鱼", "蝶尾金鱼"],        emoji: "🐡" },
+  Epic:     { names: ["龙纹锦鲤", "古代鲟鱼", "巨型鲶鱼"],  emoji: "🦈" },
+  Legendary:{ names: ["锦鲤王", "神话巨鲤", "传说龙鱼"],    emoji: "🐉" },
+};
+
+const RARITY_COLORS: Record<Rarity, string> = {
+  Common:    "#9E9E9E",
+  Rare:      "#2196F3",
+  SuperRare: "#9C27B0",
+  Epic:      "#FF6F00",
+  Legendary: "#FFD700",
+};
+
+const RARITY_BG: Record<Rarity, string> = {
+  Common:    "#F5F5F5",
+  Rare:      "#E3F2FD",
+  SuperRare: "#F3E5F5",
+  Epic:      "#FFF3E0",
+  Legendary: "#FFFDE7",
+};
+
+const STATUS_EMOJI: Record<OtherPlayer["status"], string> = {
+  waiting: "😴",
+  fishing: "😤",
+  caught:  "😍",
+  locked:  "✅",
+};
+
+// ── Mock 其他玩家 ─────────────────────────────────────────
+const MOCK_OTHERS: OtherPlayer[] = [
+  { ens: "vitalik.eth", status: "fishing", score: 0 },
+  { ens: "sakura.eth",  status: "caught",  score: 1240 },
+  { ens: "moon.eth",    status: "locked",  score: 3870 },
+];
+
+// ── 工具函数 ─────────────────────────────────────────────
+function randomFish(): FishResult {
+  const rarities: Rarity[] = ["Common","Common","Common","Rare","Rare","SuperRare","Epic","Legendary"];
+  const rarity = rarities[Math.floor(Math.random() * rarities.length)];
+  const db = FISH_DB[rarity];
+  const name = db.names[Math.floor(Math.random() * db.names.length)];
+  const weight = Math.round((0.5 + Math.random() * 15) * 10) / 10;
+  const score = Math.round(weight * { Common:10, Rare:25, SuperRare:60, Epic:120, Legendary:300 }[rarity]);
+  return { name, rarity, weight, score, emoji: db.emoji };
+}
+
+// ── 主组件 ───────────────────────────────────────────────
+export default function GameScreen() {
+  const router = useRouter();
+  const [phase, setPhase] = useState<GamePhase>("waiting_cast");
+  const [fish, setFish] = useState<FishResult | null>(null);
+  const [castCount, setCastCount] = useState(0);
+  const [totalPot] = useState(0.038);
+  const [timeLeft, setTimeLeft] = useState(180);
+  const [buffs, setBuffs] = useState<string[]>([]);
+  const [diceResult, setDiceResult] = useState<{ text: string; isBuff: boolean } | null>(null);
+
+  // 倒计时
+  useEffect(() => {
+    if (phase === "locked") return;
+    const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+
+  // 抛竿
+  const handleCast = useCallback(() => {
+    if (phase !== "waiting_cast") return;
+    setPhase("waiting_vrf");
+    setTimeout(() => setPhase("reeling"), 2000);
+  }, [phase]);
+
+  // 收竿结果
+  const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
+    if (result === "miss") {
+      setPhase("waiting_cast");
+      return;
+    }
+    const f = randomFish();
+    setFish(f);
+    setPhase("fish_result");
+    setTimeout(() => setPhase("decision"), 1200);
+  }, []);
+
+  // 锁定
+  const handleLockIn = () => {
+    setPhase("locked");
+    setTimeout(() => router.push("/settlement"), 2000);
+  };
+
+  // 重投
+  const handleRecast = () => {
+    if (castCount >= 3) return;
+    setPhase("dice_roll");
+  };
+
+  // 骰子结果
+  const handleDiceFinish = (buff: { text: string; isBuff: boolean }) => {
+    setDiceResult(buff);
+    setBuffs(prev => [...prev, buff.isBuff ? "⬆️" : "⬇️"]);
+    setCastCount(c => c + 1);
+    setTimeout(() => {
+      setDiceResult(null);
+      setPhase("waiting_cast");
+    }, 2500);
+  };
+
+  return (
+    <div style={{
+      width: "100vw", height: "100vh",
+      overflow: "hidden", position: "relative",
+      background: "linear-gradient(180deg, #87CEEB 0%, #B8E4F9 35%, #4A9DB5 60%, #2E6B8A 100%)",
+    }}
+    onClick={phase === "waiting_cast" ? handleCast : undefined}
+    >
+      {/* 背景层 */}
+      <GameBackground />
+
+      {/* 顶部状态栏 */}
+      <TopBar
+        castCount={castCount}
+        totalPot={totalPot}
+        timeLeft={timeLeft}
+      />
+
+      {/* 右侧玩家状态 */}
+      <PlayerSidebar players={MOCK_OTHERS} />
+
+      {/* 左侧 Buff 区 */}
+      {buffs.length > 0 && <BuffArea buffs={buffs} />}
+
+      {/* 中央游戏区 */}
+      <CentralArea
+        phase={phase}
+        fish={fish}
+        onReel={handleReel}
+        onLockIn={handleLockIn}
+        onRecast={handleRecast}
+        castCount={castCount}
+      />
+
+      {/* 骰子弹窗 */}
+      {phase === "dice_roll" && (
+        <DiceModal onFinish={handleDiceFinish} recastNumber={castCount + 1} />
+      )}
+    </div>
+  );
+}
+
+// ── 背景组件 ─────────────────────────────────────────────
+function GameBackground() {
+  return (
+    <>
+      {/* 远山 */}
+      <div style={{
+        position: "absolute", bottom: "38%", left: 0, right: 0,
+        height: "100px",
+        background: "linear-gradient(180deg, #A8C5A0, #7AAD70)",
+        clipPath: "ellipse(55% 100% at 45% 100%)",
+        opacity: 0.5,
+      }}/>
+      <div style={{
+        position: "absolute", bottom: "36%", left: "20%", right: "-10%",
+        height: "80px",
+        background: "linear-gradient(180deg, #B8D4B0, #8ABD80)",
+        clipPath: "ellipse(50% 100% at 55% 100%)",
+        opacity: 0.4,
+      }}/>
+      {/* 水面 */}
+      <div style={{
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        height: "38%",
+        background: "linear-gradient(180deg, #4A9DB5 0%, #1E5F7A 100%)",
+      }}/>
+      {/* 码头 */}
+      <div style={{
+        position: "absolute",
+        bottom: "38%", left: "50%",
+        transform: "translateX(-50%)",
+        width: "120px", height: "24px",
+        background: "#8B6355",
+        borderRadius: "4px 4px 0 0",
+      }}/>
+      {/* 鱼线 */}
+      <div style={{
+        position: "absolute",
+        bottom: "38%", left: "50%",
+        width: "2px", height: "80px",
+        background: "rgba(255,255,255,0.5)",
+        transformOrigin: "top center",
+      }}/>
+    </>
+  );
+}
+
+// ── 顶部状态栏 ───────────────────────────────────────────
+function TopBar({ castCount, totalPot, timeLeft }: {
+  castCount: number; totalPot: number; timeLeft: number;
+}) {
+  const isUrgent = timeLeft <= 20;
+  const mins = Math.floor(timeLeft / 60);
+  const secs = timeLeft % 60;
+
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0,
+      height: "64px",
+      background: "rgba(255,255,255,0.15)",
+      backdropFilter: "blur(8px)",
+      borderBottom: "1px solid rgba(255,255,255,0.2)",
+      display: "flex", alignItems: "center",
+      justifyContent: "space-between",
+      padding: "0 24px", zIndex: 50,
+    }}>
+      {/* 轮次 */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ fontSize: "13px", fontWeight: 700, color: "white", opacity: 0.8 }}>
+          第 {castCount + 1} 轮
+        </span>
+        <div style={{ display: "flex", gap: "5px" }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{
+              width: "8px", height: "8px", borderRadius: "50%",
+              background: i < castCount ? "white"
+                : i === castCount ? "var(--coral)"
+                : "rgba(255,255,255,0.3)",
+              boxShadow: i === castCount ? "0 0 6px var(--coral)" : "none",
+              animation: i === castCount ? "pulse-glow 1.5s ease-in-out infinite" : "none",
+            }}/>
+          ))}
+        </div>
+      </div>
+
+      {/* 奖池 */}
+      <div style={{
+        background: "var(--yellow-soft)",
+        borderRadius: "20px", padding: "6px 16px",
+        display: "flex", alignItems: "center", gap: "6px",
+        border: "1px solid #F0E06A",
+      }}>
+        <span style={{ fontSize: "14px", animation: "spin 4s linear infinite" }}>🪙</span>
+        <span style={{ fontWeight: 900, fontSize: "16px", color: "var(--brown)" }}>
+          {totalPot.toFixed(3)} ETH
+        </span>
+      </div>
+
+      {/* 倒计时 */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "6px",
+        color: isUrgent ? "var(--coral)" : "white",
+        transition: "color 0.3s ease",
+      }}>
+        <span style={{
+          fontSize: "18px",
+          animation: isUrgent ? "wiggle 0.5s ease-in-out infinite" : "none",
+        }}>⏳</span>
+        <span style={{ fontWeight: 800, fontSize: "16px", fontVariantNumeric: "tabular-nums" }}>
+          {mins}:{secs.toString().padStart(2, "0")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 右侧玩家状态栏 ───────────────────────────────────────
+function PlayerSidebar({ players }: { players: OtherPlayer[] }) {
+  return (
+    <div style={{
+      position: "absolute", top: "80px", right: "16px",
+      display: "flex", flexDirection: "column", gap: "8px",
+      zIndex: 40, width: "160px",
+    }}>
+      {players.map((p, i) => (
+        <div key={i} style={{
+          background: "rgba(255,255,255,0.85)",
+          backdropFilter: "blur(6px)",
+          borderRadius: "16px", padding: "10px 12px",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+            <div style={{
+              width: "32px", height: "32px",
+              background: "linear-gradient(135deg, #B2DFDB, #80CBC4)",
+              borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "14px", flexShrink: 0,
+            }}>🐡</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontSize: "11px", fontWeight: 800,
+                color: "var(--brown)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{p.ens}</div>
+              <div style={{ fontSize: "14px" }}>
+                {STATUS_EMOJI[p.status]}
+              </div>
+            </div>
+          </div>
+          {/* 模糊进度条 */}
+          <div style={{
+            height: "4px", background: "#EEE", borderRadius: "2px", overflow: "hidden",
+          }}>
+            <div style={{
+              height: "100%",
+              width: p.status === "locked" ? "90%" : p.status === "caught" ? "60%" : "30%",
+              background: p.status === "locked"
+                ? "var(--mint-dark)" : "var(--coral-light)",
+              borderRadius: "2px",
+              transition: "width 0.5s ease",
+            }}/>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── 左侧 Buff 区 ─────────────────────────────────────────
+function BuffArea({ buffs }: { buffs: string[] }) {
+  return (
+    <div style={{
+      position: "absolute", top: "80px", left: "16px",
+      zIndex: 40,
+    }}>
+      <div style={{
+        fontSize: "10px", fontWeight: 700,
+        color: "rgba(255,255,255,0.7)",
+        marginBottom: "6px",
+      }}>本局加成</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        {buffs.map((b, i) => (
+          <div key={i} style={{
+            width: "32px", height: "32px",
+            background: "rgba(255,255,255,0.85)",
+            borderRadius: "50%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "16px",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+          }}>{b}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 中央游戏区 ───────────────────────────────────────────
+function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount }: {
+  phase: GamePhase;
+  fish: FishResult | null;
+  onReel: (r: "perfect" | "good" | "ok" | "miss") => void;
+  onLockIn: () => void;
+  onRecast: () => void;
+  castCount: number;
+}) {
+  return (
+    <div style={{
+      position: "absolute",
+      top: "64px", left: 0, right: "192px", bottom: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {phase === "waiting_cast" && <WaitingCastUI />}
+      {phase === "waiting_vrf"  && <WaitingVRFUI />}
+      {phase === "reeling"      && <ReelingBar onResult={onReel} />}
+      {(phase === "fish_result" || phase === "decision") && fish && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
+          <FishCard fish={fish} />
+          {phase === "decision" && (
+            <DecisionButtons
+              onLockIn={onLockIn}
+              onRecast={onRecast}
+              castCount={castCount}
+              recastFee="0.01"
+            />
+          )}
+        </div>
+      )}
+      {phase === "locked" && (
+        <div style={{
+          background: "rgba(255,255,255,0.9)",
+          borderRadius: "24px", padding: "32px 48px",
+          textAlign: "center",
+          animation: "bounce-in 0.4s ease forwards",
+        }}>
+          <div style={{ fontSize: "48px", marginBottom: "8px" }}>✅</div>
+          <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--brown)" }}>
+            已锁定结果！
+          </div>
+          <div style={{ fontSize: "13px", color: "var(--brown-light)", marginTop: "4px" }}>
+            等待其他玩家完成...
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 等待抛竿 UI ──────────────────────────────────────────
+function WaitingCastUI() {
+  return (
+    <div style={{ textAlign: "center" }}>
+      {/* 鱼影 */}
+      <div style={{
+        position: "relative", width: "300px", height: "120px", marginBottom: "24px",
+      }}>
+        {[
+          { size: 60, opacity: 0.25, x: 40, y: 20, delay: "0s" },
+          { size: 90, opacity: 0.35, x: 130, y: 50, delay: "1.2s" },
+          { size: 45, opacity: 0.2,  x: 220, y: 15, delay: "0.6s" },
+        ].map((s, i) => (
+          <div key={i} style={{
+            position: "absolute",
+            left: s.x, top: s.y,
+            fontSize: s.size / 3,
+            opacity: s.opacity,
+            filter: "blur(1px) grayscale(1)",
+            animation: `float 3s ease-in-out infinite`,
+            animationDelay: s.delay,
+          }}>🐟</div>
+        ))}
+      </div>
+
+      {/* 抛竿按钮 */}
+      <div style={{
+        width: "180px", height: "180px",
+        borderRadius: "50%",
+        background: "rgba(255,255,255,0.2)",
+        border: "3px dashed rgba(255,123,107,0.6)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        cursor: "pointer",
+        animation: "pulse-glow 2s ease-in-out infinite",
+        backdropFilter: "blur(4px)",
+        margin: "0 auto",
+      }}>
+        <span style={{ fontSize: "48px", marginBottom: "4px" }}>🎣</span>
+        <span style={{
+          fontWeight: 800, fontSize: "15px", color: "white",
+          textShadow: "0 1px 4px rgba(0,0,0,0.3)",
+        }}>点击抛竿</span>
+        <span style={{
+          fontSize: "11px", color: "rgba(255,255,255,0.7)",
+          marginTop: "2px",
+        }}>点击画面任意位置</span>
+      </div>
+    </div>
+  );
+}
+
+// ── 等待 VRF UI ──────────────────────────────────────────
+function WaitingVRFUI() {
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div style={{
+        fontSize: "48px", marginBottom: "16px",
+        animation: "float 1s ease-in-out infinite",
+      }}>🎣</div>
+      <div style={{
+        background: "rgba(255,255,255,0.85)",
+        borderRadius: "20px", padding: "16px 28px",
+        backdropFilter: "blur(6px)",
+      }}>
+        <div style={{
+          fontWeight: 700, fontSize: "15px", color: "var(--brown)",
+          display: "flex", alignItems: "center", gap: "8px",
+        }}>
+          <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>🐠</span>
+          鱼儿们在考虑中...
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 收竿 Bar ─────────────────────────────────────────────
+function ReelingBar({ onResult }: {
+  onResult: (r: "perfect" | "good" | "ok" | "miss") => void;
+}) {
+  const [pos, setPos] = useState(50); // 0-100
+  const [dir, setDir] = useState(1);
+  const [speed] = useState(1.2 + Math.random() * 0.8);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const posRef = useRef(50);
+  const dirRef = useRef(1);
+  const doneRef = useRef(false);
+  const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    const animate = () => {
+      if (doneRef.current) return;
+      posRef.current += dirRef.current * speed;
+      if (posRef.current >= 100) { posRef.current = 100; dirRef.current = -1; }
+      if (posRef.current <= 0)   { posRef.current = 0;   dirRef.current = 1; }
+      setPos(posRef.current);
+      rafRef.current = requestAnimationFrame(animate);
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [speed]);
+
+  const handleHit = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    cancelAnimationFrame(rafRef.current);
+    const p = posRef.current;
+    let result: "perfect" | "good" | "ok" | "miss";
+    let fb: string;
+    if (p >= 35 && p <= 65) { result = "perfect"; fb = "完美 ✨"; }
+    else if ((p >= 20 && p < 35) || (p > 65 && p <= 80)) { result = "good"; fb = "不错哦 👍"; }
+    else if ((p >= 10 && p < 20) || (p > 80 && p <= 90)) { result = "ok";   fb = "险险的 😅"; }
+    else { result = "miss"; fb = "哎呀空杆了 💦"; }
+    setFeedback(fb);
+    setTimeout(() => onResult(result), 900);
+  }, [onResult]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.code === "Space") { e.preventDefault(); handleHit(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleHit]);
+
+  // 区域颜色
+  const getZoneColor = (p: number) => {
+    if (p >= 35 && p <= 65) return "#4CAF50";
+    if ((p >= 20 && p < 35) || (p > 65 && p <= 80)) return "#FFC107";
+    return "#F44336";
+  };
+
+  return (
+    <div
+      onClick={handleHit}
+      style={{
+        background: "rgba(255,255,255,0.92)",
+        borderRadius: "24px", padding: "24px 32px",
+        width: "480px", textAlign: "center",
+        backdropFilter: "blur(8px)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
+        cursor: "pointer",
+        animation: "bounce-in 0.3s ease forwards",
+      }}>
+      <div style={{
+        fontSize: "13px", fontWeight: 700,
+        color: "var(--brown-light)", marginBottom: "12px",
+      }}>
+        咬钩啦！快按 <kbd style={{
+          background: "var(--cream)", borderRadius: "6px",
+          padding: "2px 8px", border: "1px solid var(--cream-dark)",
+          fontFamily: "monospace",
+        }}>Space</kbd> 或点击收竿！
+      </div>
+
+      {/* Bar 轨道 */}
+      <div style={{
+        position: "relative", height: "52px",
+        borderRadius: "26px", overflow: "hidden",
+        background: "#F44336",
+        marginBottom: "12px",
+      }}>
+        {/* 黄区 */}
+        <div style={{
+          position: "absolute", top: 0, bottom: 0,
+          left: "20%", right: "20%",
+          background: "#FFC107",
+        }}/>
+        {/* 绿区 */}
+        <div style={{
+          position: "absolute", top: 0, bottom: 0,
+          left: "35%", right: "35%",
+          background: "#4CAF50",
+        }}/>
+
+        {/* 小鸟指针 */}
+        <div style={{
+          position: "absolute", top: "50%",
+          left: `${pos}%`,
+          transform: "translate(-50%, -50%)",
+          fontSize: "28px",
+          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.2))",
+          transition: "none",
+          zIndex: 2,
+        }}>🐦</div>
+      </div>
+
+      {/* 区域说明 */}
+      <div style={{
+        display: "flex", justifyContent: "space-between",
+        fontSize: "10px", color: "var(--brown-light)", fontWeight: 600,
+        marginBottom: "8px", padding: "0 4px",
+      }}>
+        <span style={{ color: "#F44336" }}>危险 50%</span>
+        <span style={{ color: "#FFC107" }}>普通 80%</span>
+        <span style={{ color: "#4CAF50" }}>完美 100%</span>
+        <span style={{ color: "#FFC107" }}>普通 80%</span>
+        <span style={{ color: "#F44336" }}>危险 50%</span>
+      </div>
+
+      {/* 反馈文字 */}
+      {feedback && (
+        <div style={{
+          fontSize: "20px", fontWeight: 900,
+          color: getZoneColor(posRef.current),
+          animation: "bounce-in 0.3s ease forwards",
+        }}>{feedback}</div>
+      )}
+    </div>
+  );
+}
+
+// ── 鱼结果卡片 ───────────────────────────────────────────
+function FishCard({ fish }: { fish: FishResult }) {
+  const isLegendary = fish.rarity === "Legendary";
+  return (
+    <div style={{
+      width: "260px",
+      background: RARITY_BG[fish.rarity],
+      borderRadius: "24px",
+      padding: "24px",
+      textAlign: "center",
+      border: `2px solid ${RARITY_COLORS[fish.rarity]}40`,
+      boxShadow: isLegendary
+        ? `0 0 30px ${RARITY_COLORS[fish.rarity]}60, 0 8px 32px rgba(0,0,0,0.15)`
+        : "0 8px 32px rgba(0,0,0,0.12)",
+      animation: "bounce-in 0.5s ease forwards",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* Legendary 光芒 */}
+      {isLegendary && (
+        <div style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "300px", height: "300px",
+          background: `radial-gradient(circle, ${RARITY_COLORS[fish.rarity]}20 0%, transparent 70%)`,
+          animation: "spin 8s linear infinite",
+          pointerEvents: "none",
+        }}/>
+      )}
+
+      {/* 鱼 emoji */}
+      <div style={{
+        fontSize: "64px", marginBottom: "8px",
+        animation: "float 2s ease-in-out infinite",
+        position: "relative", zIndex: 1,
+      }}>{fish.emoji}</div>
+
+      {/* 稀有度标签 */}
+      <div style={{
+        display: "inline-block",
+        background: `${RARITY_COLORS[fish.rarity]}20`,
+        color: RARITY_COLORS[fish.rarity],
+        borderRadius: "8px", padding: "3px 10px",
+        fontSize: "11px", fontWeight: 800,
+        marginBottom: "8px",
+      }}>{fish.rarity}</div>
+
+      {/* 鱼名 */}
+      <div style={{
+        fontFamily: "var(--font-serif)",
+        fontSize: "22px", fontWeight: 700,
+        color: "var(--brown)", marginBottom: "16px",
+      }}>{fish.name}</div>
+
+      {/* 数据 */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr 1fr",
+        gap: "8px",
+      }}>
+        {[
+          { icon: "⚖️", label: "重量", value: `${fish.weight} kg` },
+          { icon: "⭐", label: "预估分", value: `${fish.score}` },
+        ].map(item => (
+          <div key={item.label} style={{
+            background: "rgba(255,255,255,0.6)",
+            borderRadius: "12px", padding: "10px 8px",
+          }}>
+            <div style={{ fontSize: "18px" }}>{item.icon}</div>
+            <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
+              {item.label}
+            </div>
+            <div style={{ fontSize: "15px", fontWeight: 800, color: "var(--brown)" }}>
+              {item.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 决策按钮 ─────────────────────────────────────────────
+function DecisionButtons({ onLockIn, onRecast, castCount, recastFee }: {
+  onLockIn: () => void;
+  onRecast: () => void;
+  castCount: number;
+  recastFee: string;
+}) {
+  const canRecast = castCount < 3;
+  return (
+    <div style={{
+      display: "flex", gap: "12px",
+      animation: "bounce-in 0.4s ease forwards",
+    }}>
+      <button className="btn-primary" onClick={onLockIn} style={{
+        background: "linear-gradient(135deg, #4CAF50, #388E3C)",
+        boxShadow: "0 4px 12px rgba(76,175,80,0.4)",
+        padding: "14px 24px", fontSize: "14px",
+        borderRadius: "16px", minWidth: "140px",
+      }}>
+        今天就钓这条！✨
+      </button>
+
+      {canRecast && (
+        <button className="btn-primary" onClick={onRecast} style={{
+          padding: "14px 24px", fontSize: "14px",
+          borderRadius: "16px", minWidth: "140px",
+        }}>
+          <div>再试一次 🎣</div>
+          <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>
+            +{recastFee} ETH
+          </div>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── 骰子弹窗 ─────────────────────────────────────────────
+function DiceModal({ onFinish, recastNumber }: {
+  onFinish: (buff: { text: string; isBuff: boolean }) => void;
+  recastNumber: number;
+}) {
+  const [stage, setStage] = useState<"rolling" | "result">("rolling");
+  const [result, setResult] = useState<{ text: string; isBuff: boolean } | null>(null);
+
+  const BUFFS = [
+    { text: "稀有度概率 +20%", isBuff: true },
+    { text: "重量加成 +25%", isBuff: true },
+    { text: "时间系数提升", isBuff: true },
+    { text: "必出 Rare 以上！", isBuff: true },
+    { text: "稀有度降级", isBuff: false },
+    { text: "时间罚时 -10s", isBuff: false },
+  ];
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const r = recastNumber >= 3
+        ? (Math.random() > 0.5 ? BUFFS[3] : BUFFS[5])
+        : BUFFS[Math.floor(Math.random() * BUFFS.length)];
+      setResult(r);
+      setStage("result");
+      setTimeout(() => onFinish(r), 2000);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.5)",
+      backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 200,
+    }}>
+      <div style={{
+        background: "white", borderRadius: "32px",
+        padding: "32px", width: "320px", textAlign: "center",
+        animation: "bounce-in 0.4s ease forwards",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+      }}>
+        <div style={{
+          fontSize: "13px", fontWeight: 700,
+          color: "var(--brown-light)", marginBottom: "16px",
+          textTransform: "uppercase", letterSpacing: "0.08em",
+        }}>
+          第 {recastNumber} 次重投骰子
+        </div>
+
+        {stage === "rolling" ? (
+          <>
+            <div style={{ fontSize: "72px", animation: "spin 0.3s linear infinite" }}>🎲</div>
+            <div style={{
+              marginTop: "16px", fontSize: "14px",
+              color: "var(--brown-light)", fontWeight: 600,
+            }}>命运的骰子滚动中...</div>
+          </>
+        ) : result ? (
+          <>
+            <div style={{
+              fontSize: "64px", marginBottom: "12px",
+              animation: "bounce-in 0.4s ease forwards",
+            }}>{result.isBuff ? "🌟" : "💀"}</div>
+            <div style={{
+              fontSize: "20px", fontWeight: 900,
+              color: result.isBuff ? "#4CAF50" : "#F44336",
+              animation: "bounce-in 0.4s ease forwards",
+            }}>{result.text}</div>
+            <div style={{
+              fontSize: "12px", color: "var(--brown-light)",
+              marginTop: "8px",
+            }}>
+              {result.isBuff ? "好运降临！✨" : "运气不佳，但还能逆风翻盘！"}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
