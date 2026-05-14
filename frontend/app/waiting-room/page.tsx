@@ -1,24 +1,158 @@
 "use client";
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
+import { useContract } from "@/lib/ethereum";
+import { FISHING_GAME_ADDRESS, TIER_NAMES, ROOM_STATUS } from "@/lib/contract";
+import { ethers } from "ethers";
 
-const MOCK_PLAYERS = [
+type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
+
+interface PlayerData {
+  address: string;
+  ens: string;
+  rod: string;
+  joined: boolean;
+}
+
+const MOCK_PLAYERS: PlayerData[] = [
   { address: "0xEf4b...3D2E", ens: "sakura.eth", rod: "Speed Rod +2", joined: true },
   { address: "0xEb0A...3324", ens: "vitalik.eth", rod: "Lucky Rod", joined: true },
   { address: "", ens: "", rod: "", joined: false },
   { address: "", ens: "", rod: "", joined: false },
 ];
 
-export default function WaitingRoom() {
+function shortenAddress(addr: string): string {
+  if (!addr || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+export default function WaitingRoomPage() {
+  return (
+    <Suspense>
+      <WaitingRoom />
+    </Suspense>
+  );
+}
+
+function WaitingRoom() {
   const router = useRouter();
-  const isHost = true;
-  const playerCount = MOCK_PLAYERS.filter(p => p.joined).length;
+  const searchParams = useSearchParams();
+  const roomId = searchParams.get("roomId");
+
+  const { wallet, getReadContract, getWriteContract } = useContract();
+  const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
+
+  const [players, setPlayers] = useState<PlayerData[]>(MOCK_PLAYERS);
+  const [roomTier, setRoomTier] = useState<RoomTier>("Bronze");
+  const [roomName, setRoomName] = useState("芦苇湾 3号");
+  const [pot, setPot] = useState(0.02);
+  const [entryFee, setEntryFee] = useState(0.01);
+  const [hostAddress, setHostAddress] = useState<string>("");
+  const [isHost, setIsHost] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch room data from contract
+  const fetchRoomData = useCallback(async () => {
+    if (!isContractReady || !roomId) return;
+    const contract = getReadContract();
+    if (!contract) return;
+
+    try {
+      const info = await contract.getRoomInfo(Number(roomId));
+      const tierIndex = Number(info.tier);
+      const tier = TIER_NAMES[tierIndex] as RoomTier;
+      const pCount = Number(info.playerCount);
+      const fee = ethers.formatEther(info.entryFee);
+      const totalPot = ethers.formatEther(info.totalPot);
+
+      setRoomTier(tier);
+      setRoomName(`${tier} 房间 #${roomId}`);
+      setPot(parseFloat(totalPot));
+      setEntryFee(parseFloat(fee));
+      setHostAddress(info.host);
+      setIsHost(wallet.address?.toLowerCase() === info.host.toLowerCase());
+
+      // Fetch player data
+      const fetchedPlayers: PlayerData[] = [];
+      for (let i = 0; i < 4; i++) {
+        if (i < pCount) {
+          try {
+            const pInfo = await contract.getPlayerInfo(Number(roomId), i);
+            fetchedPlayers.push({
+              address: pInfo.addr,
+              ens: shortenAddress(pInfo.addr),
+              rod: "Standard Rod",
+              joined: true,
+            });
+          } catch {
+            fetchedPlayers.push({ address: "", ens: "", rod: "", joined: false });
+          }
+        } else {
+          fetchedPlayers.push({ address: "", ens: "", rod: "", joined: false });
+        }
+      }
+      setPlayers(fetchedPlayers);
+    } catch {
+      // Keep mock data on error
+    }
+  }, [isContractReady, roomId, getReadContract, wallet.address]);
+
+  useEffect(() => {
+    fetchRoomData();
+  }, [fetchRoomData]);
+
+  // Listen for PlayerJoined events
+  useEffect(() => {
+    if (!isContractReady || !roomId) return;
+    const contract = getReadContract();
+    if (!contract) return;
+
+    const roomIdNum = Number(roomId);
+    const onPlayerJoined = (eventRoomId: bigint) => {
+      if (Number(eventRoomId) === roomIdNum) {
+        fetchRoomData();
+      }
+    };
+    const onGameStarted = (eventRoomId: bigint) => {
+      if (Number(eventRoomId) === roomIdNum) {
+        router.push(`/game/${roomId}`);
+      }
+    };
+
+    contract.on("PlayerJoined", onPlayerJoined);
+    contract.on("GameStarted", onGameStarted);
+    return () => {
+      contract.off("PlayerJoined", onPlayerJoined);
+      contract.off("GameStarted", onGameStarted);
+    };
+  }, [isContractReady, roomId, getReadContract, fetchRoomData, router]);
+
+  const playerCount = players.filter(p => p.joined).length;
   const canStart = playerCount >= 2;
 
-  // 模拟新玩家加入动画
-  const [animatedSlots, setAnimatedSlots] = useState<number[]>([0, 1]);
-  const [pot, setPot] = useState(0.02);
+  // Start game handler
+  const handleStartGame = async () => {
+    if (!isContractReady || !roomId) {
+      router.push("/game/0");
+      return;
+    }
+
+    const contract = getWriteContract();
+    if (!contract) return;
+
+    setLoading(true);
+    try {
+      const tx = await contract.startGame(Number(roomId));
+      await tx.wait();
+      router.push(`/game/${roomId}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "开始失败";
+      alert(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 水面气泡
   const [bubbles, setBubbles] = useState<{ id: number; x: number; delay: number }[]>([]);
@@ -32,6 +166,15 @@ export default function WaitingRoom() {
     return () => clearInterval(interval);
   }, []);
 
+  const TIER_BADGE_COLORS: Record<RoomTier, { bg: string; color: string }> = {
+    Bronze:  { bg: "#FFF5EE", color: "#C8956C" },
+    Silver:  { bg: "#F0F5FA", color: "#A8B8C8" },
+    Gold:    { bg: "#FFFDE7", color: "#E8C547" },
+    Diamond: { bg: "#F5F0FF", color: "#B39DDB" },
+  };
+
+  const maxPot = entryFee * 4 * 0.95;
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -39,7 +182,11 @@ export default function WaitingRoom() {
       position: "relative",
       overflow: "hidden",
     }}>
-      <Navbar />
+      <Navbar
+        walletAddress={wallet.address}
+        isConnecting={wallet.isConnecting}
+        onConnect={wallet.connect}
+      />
 
       {/* 背景装饰：远山 */}
       <div style={{
@@ -93,20 +240,27 @@ export default function WaitingRoom() {
           }}>等待其他小钓手 🎣</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginTop: "6px" }}>
             <span style={{ fontSize: "13px", color: "var(--brown-light)", fontWeight: 600 }}>
-              芦苇湾 3号
+              {roomName}
             </span>
             <span style={{
-              background: "#FFF5EE", color: "#C8956C",
+              background: TIER_BADGE_COLORS[roomTier].bg,
+              color: TIER_BADGE_COLORS[roomTier].color,
               borderRadius: "8px", padding: "2px 8px",
               fontSize: "11px", fontWeight: 700,
-            }}>Bronze</span>
+            }}>{roomTier}</span>
           </div>
         </div>
 
         {/* 玩家槽位 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
-          {MOCK_PLAYERS.map((player, i) => (
-            <PlayerSlot key={i} player={player} index={i} isMe={i === 0} />
+          {players.map((player, i) => (
+            <PlayerSlot
+              key={i}
+              player={player}
+              index={i}
+              isMe={!!wallet.address && player.address.toLowerCase() === wallet.address.toLowerCase()}
+              isHostSlot={isContractReady ? player.address.toLowerCase() === hostAddress.toLowerCase() : i === 0}
+            />
           ))}
         </div>
 
@@ -132,7 +286,7 @@ export default function WaitingRoom() {
             💰 {pot.toFixed(2)} ETH
           </span>
           <span style={{ fontSize: "12px", color: "var(--brown-light)" }}>
-            满员后 {(0.04 * 0.95).toFixed(3)} ETH
+            满员后 {maxPot.toFixed(3)} ETH
           </span>
         </div>
 
@@ -141,17 +295,17 @@ export default function WaitingRoom() {
           <div>
             <button
               className="btn-primary"
-              onClick={() => router.push("/game")}
-              disabled={!canStart}
+              onClick={handleStartGame}
+              disabled={!canStart || loading}
               style={{
                 width: "100%", height: "52px",
                 fontSize: "16px", borderRadius: "16px",
-                opacity: canStart ? 1 : 0.5,
-                cursor: canStart ? "pointer" : "not-allowed",
-                animation: canStart ? "pulse-glow 2s ease-in-out infinite" : "none",
+                opacity: canStart && !loading ? 1 : 0.5,
+                cursor: canStart && !loading ? "pointer" : "not-allowed",
+                animation: canStart && !loading ? "pulse-glow 2s ease-in-out infinite" : "none",
               }}
             >
-              开始游戏 ▶
+              {loading ? "等待链上确认..." : "开始游戏 ▶"}
             </button>
             {!canStart && (
               <div style={{
@@ -202,11 +356,12 @@ export default function WaitingRoom() {
 
 // ── 玩家槽位组件 ─────────────────────────────────────────
 function PlayerSlot({
-  player, index, isMe,
+  player, index, isMe, isHostSlot,
 }: {
-  player: { address: string; ens: string; rod: string; joined: boolean };
+  player: PlayerData;
   index: number;
   isMe: boolean;
+  isHostSlot: boolean;
 }) {
   if (player.joined) {
     return (
@@ -239,7 +394,7 @@ function PlayerSlot({
                 fontSize: "10px", fontWeight: 700,
               }}>你</span>
             )}
-            {index === 0 && (
+            {isHostSlot && (
               <span style={{
                 background: "var(--yellow-soft)", color: "#C8A020",
                 borderRadius: "6px", padding: "1px 6px",

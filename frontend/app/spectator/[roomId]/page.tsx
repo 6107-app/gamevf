@@ -97,8 +97,9 @@ function fmtWeight(g: number) {
 }
 
 function getOdds(playerIdx: number): number {
-  if (MOCK_TOTAL_BET === 0) return 0;
-  return Math.round((MOCK_BETS[playerIdx] / MOCK_TOTAL_BET) * 100);
+  const total = MOCK_TOTAL_BET as number;
+  if (total === 0) return 0;
+  return Math.round((MOCK_BETS[playerIdx] / total) * 100);
 }
 
 function nowStr() {
@@ -352,8 +353,8 @@ export default function SpectatorPage() {
         timestamp: nowStr(),
         playerEns: "moon.eth",
         playerAvatar: "🐳",
-        type: "caught",
-        rarity: "Rare",
+        type: "caught" as const,
+        rarity: "Rare" as const,
         weight: 2800,
         score: 1050,
       }, ...prev].slice(0, 20));

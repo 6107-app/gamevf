@@ -2,8 +2,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
+import { useContract } from "@/lib/ethereum";
+import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES } from "@/lib/contract";
+import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
+
+const TIER_INDEX: Record<RoomTier, number> = {
+  Bronze: 0,
+  Silver: 1,
+  Gold: 2,
+  Diamond: 3,
+};
 
 const TIERS: {
   tier: RoomTier;
@@ -27,20 +37,79 @@ export default function CreateRoom() {
   const [isLivestream, setIsLivestream] = useState(false);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { wallet, getWriteContract } = useContract();
+  const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   const selected = TIERS.find(t => t.tier === selectedTier)!;
 
   const handleCreate = async () => {
     setLoading(true);
-    // 后续接合约
-    await new Promise(r => setTimeout(r, 1500));
-    setLoading(false);
-    router.push("/waiting-room");
+    setError(null);
+
+    if (!isContractReady) {
+      // Fallback: mock behavior
+      await new Promise(r => setTimeout(r, 1500));
+      setLoading(false);
+      router.push("/waiting-room");
+      return;
+    }
+
+    const contract = getWriteContract();
+    if (!contract) {
+      setError("钱包未连接");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const tierIndex = TIER_INDEX[selectedTier];
+      const entryFee = TIER_ENTRY_FEES[selectedTier];
+      const tx = await contract.createRoom(tierIndex, isPublic, isLivestream, {
+        value: ethers.parseEther(entryFee),
+      });
+      const receipt = await tx.wait();
+
+      // Extract roomId from RoomCreated event
+      let roomId: number | null = null;
+      if (receipt && receipt.logs) {
+        for (const log of receipt.logs) {
+          try {
+            const parsed = contract.interface.parseLog({
+              topics: log.topics as string[],
+              data: log.data,
+            });
+            if (parsed && parsed.name === "RoomCreated") {
+              roomId = Number(parsed.args.roomId);
+              break;
+            }
+          } catch {
+            // Not our event, skip
+          }
+        }
+      }
+
+      setLoading(false);
+      if (roomId !== null) {
+        router.push(`/waiting-room?roomId=${roomId}`);
+      } else {
+        router.push("/waiting-room");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "创建失败";
+      setError(msg);
+      setLoading(false);
+    }
   };
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      <Navbar />
+      <Navbar
+        walletAddress={wallet.address}
+        isConnecting={wallet.isConnecting}
+        onConnect={wallet.connect}
+      />
 
       <div style={{
         maxWidth: "560px",
@@ -230,6 +299,22 @@ export default function CreateRoom() {
               * 平台收取 5% 手续费，奖池实发 95%
             </div>
           </div>
+
+          {/* 错误提示 */}
+          {error && (
+            <div style={{
+              background: "#FFF0F0",
+              border: "1px solid #FFB3B3",
+              borderRadius: "12px",
+              padding: "10px 16px",
+              marginBottom: "16px",
+              fontSize: "13px",
+              color: "#E53E3E",
+              fontWeight: 600,
+            }}>
+              {error}
+            </div>
+          )}
 
           {/* 确认按钮 */}
           <button

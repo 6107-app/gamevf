@@ -3,17 +3,29 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import AnnouncementBar from "@/components/ui/AnnouncementBar";
 import RoomCard from "@/components/lobby/RoomCard";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useContract } from "@/lib/ethereum";
+import { FISHING_GAME_ADDRESS, TIER_NAMES, ROOM_STATUS, TIER_ENTRY_FEES } from "@/lib/contract";
+import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
 type FilterTier = "全部" | RoomTier;
 
-const MOCK_ROOMS = [
-  { roomId: 0, name: "芦苇湾 3号", tier: "Bronze" as RoomTier, entryFee: "0.01", playerCount: 2, isLivestream: false },
-  { roomId: 1, name: "荷花池 1号", tier: "Silver" as RoomTier, entryFee: "0.05", playerCount: 3, isLivestream: true },
-  { roomId: 2, name: "金鳞湖 7号", tier: "Gold" as RoomTier, entryFee: "0.10", playerCount: 1, isLivestream: false },
-  { roomId: 3, name: "星钻湾 2号", tier: "Diamond" as RoomTier, entryFee: "0.50", playerCount: 4, isLivestream: true },
-  { roomId: 4, name: "竹林湾 5号", tier: "Bronze" as RoomTier, entryFee: "0.01", playerCount: 1, isLivestream: false },
+interface RoomData {
+  roomId: number;
+  name: string;
+  tier: RoomTier;
+  entryFee: string;
+  playerCount: number;
+  isLivestream: boolean;
+}
+
+const MOCK_ROOMS: RoomData[] = [
+  { roomId: 0, name: "芦苇湾 3号", tier: "Bronze", entryFee: "0.01", playerCount: 2, isLivestream: false },
+  { roomId: 1, name: "荷花池 1号", tier: "Silver", entryFee: "0.05", playerCount: 3, isLivestream: true },
+  { roomId: 2, name: "金鳞湖 7号", tier: "Gold", entryFee: "0.10", playerCount: 1, isLivestream: false },
+  { roomId: 3, name: "星钻湾 2号", tier: "Diamond", entryFee: "0.50", playerCount: 4, isLivestream: true },
+  { roomId: 4, name: "竹林湾 5号", tier: "Bronze", entryFee: "0.01", playerCount: 1, isLivestream: false },
 ];
 
 const TIER_FILTER_COLORS: Record<FilterTier, string> = {
@@ -24,12 +36,117 @@ const TIER_FILTER_COLORS: Record<FilterTier, string> = {
   "Diamond": "#B39DDB",
 };
 
+const ROOM_NAMES: Record<RoomTier, string[]> = {
+  Bronze:  ["芦苇湾", "竹林湾", "草塘"],
+  Silver:  ["荷花池", "银月湖", "清风渡"],
+  Gold:    ["金鳞湖", "锦鲤潭", "龙门坊"],
+  Diamond: ["星钻湾", "龙宫阁", "仙人渡"],
+};
+
+function generateRoomName(tier: RoomTier, roomId: number): string {
+  const names = ROOM_NAMES[tier];
+  return `${names[roomId % names.length]} ${roomId + 1}号`;
+}
+
 export default function Home() {
   const [filter, setFilter] = useState<FilterTier>("全部");
   const [liveOnly, setLiveOnly] = useState(false);
+  const [rooms, setRooms] = useState<RoomData[]>(MOCK_ROOMS);
+  const [loading, setLoading] = useState(false);
+  const [joiningRoom, setJoiningRoom] = useState<number | null>(null);
   const router = useRouter();
 
-  const filtered = MOCK_ROOMS.filter(r => {
+  const { wallet, getReadContract, getWriteContract } = useContract();
+  const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
+
+  // Fetch rooms from contract
+  const fetchRooms = useCallback(async () => {
+    if (!isContractReady) {
+      setRooms(MOCK_ROOMS);
+      return;
+    }
+    const contract = getReadContract();
+    if (!contract) return;
+
+    setLoading(true);
+    try {
+      const count = await contract.roomCount();
+      const roomCount = Number(count);
+      const fetchedRooms: RoomData[] = [];
+
+      for (let i = 0; i < roomCount; i++) {
+        try {
+          const info = await contract.getRoomInfo(i);
+          const tierIndex = Number(info.tier);
+          const status = Number(info.status);
+          // Only show Waiting rooms in the lobby
+          if (status !== 0) continue;
+          const tier = TIER_NAMES[tierIndex] as RoomTier;
+          fetchedRooms.push({
+            roomId: Number(info.id),
+            name: generateRoomName(tier, Number(info.id)),
+            tier,
+            entryFee: ethers.formatEther(info.entryFee),
+            playerCount: Number(info.playerCount),
+            isLivestream: info.isLivestream,
+          });
+        } catch {
+          // Skip rooms that fail to load
+        }
+      }
+
+      setRooms(fetchedRooms.length > 0 ? fetchedRooms : MOCK_ROOMS);
+    } catch {
+      setRooms(MOCK_ROOMS);
+    } finally {
+      setLoading(false);
+    }
+  }, [isContractReady, getReadContract]);
+
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  // Listen for RoomCreated events to refresh
+  useEffect(() => {
+    if (!isContractReady) return;
+    const contract = getReadContract();
+    if (!contract) return;
+
+    const onRoomCreated = () => {
+      fetchRooms();
+    };
+    contract.on("RoomCreated", onRoomCreated);
+    return () => {
+      contract.off("RoomCreated", onRoomCreated);
+    };
+  }, [isContractReady, getReadContract, fetchRooms]);
+
+  // Join room handler
+  const handleJoin = async (roomId: number, entryFee: string) => {
+    if (!isContractReady) {
+      alert(`加入房间 ${roomId}`);
+      return;
+    }
+    const contract = getWriteContract();
+    if (!contract) return;
+
+    setJoiningRoom(roomId);
+    try {
+      const tx = await contract.joinRoom(roomId, {
+        value: ethers.parseEther(entryFee),
+      });
+      await tx.wait();
+      router.push(`/waiting-room?roomId=${roomId}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "加入失败";
+      alert(msg);
+    } finally {
+      setJoiningRoom(null);
+    }
+  };
+
+  const filtered = rooms.filter(r => {
     if (filter !== "全部" && r.tier !== filter) return false;
     if (liveOnly && !r.isLivestream) return false;
     return true;
@@ -37,7 +154,11 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      <Navbar />
+      <Navbar
+        walletAddress={wallet.address}
+        isConnecting={wallet.isConnecting}
+        onConnect={wallet.connect}
+      />
       <AnnouncementBar />
 
       <div style={{
@@ -101,22 +222,34 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Loading */}
+          {loading && (
+            <div style={{
+              textAlign: "center", padding: "40px",
+              color: "var(--brown-light)", fontSize: "14px",
+            }}>
+              🐠 加载房间中...
+            </div>
+          )}
+
           {/* 房间列表 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {filtered.length === 0 ? (
-              <div style={{
-                textAlign: "center", padding: "60px",
-                color: "var(--brown-light)", fontSize: "15px",
-              }}>
-                🎣 暂无符合条件的房间，要不要创建一个？
-              </div>
-            ) : filtered.map(room => (
-              <RoomCard key={room.roomId} {...room}
-                onJoin={() => alert(`加入房间 ${room.name}`)}
-                onWatch={() => router.push(`/spectator/${room.roomId}`)}
-              />
-            ))}
-          </div>
+          {!loading && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {filtered.length === 0 ? (
+                <div style={{
+                  textAlign: "center", padding: "60px",
+                  color: "var(--brown-light)", fontSize: "15px",
+                }}>
+                  🎣 暂无符合条件的房间，要不要创建一个？
+                </div>
+              ) : filtered.map(room => (
+                <RoomCard key={room.roomId} {...room}
+                  onJoin={() => handleJoin(room.roomId, room.entryFee)}
+                  onWatch={() => router.push(`/spectator/${room.roomId}`)}
+                />
+              ))}
+            </div>
+          )}
 
           {/* 创建房间按钮 */}
           <button className="btn-primary" onClick={() => router.push("/create-room")} style={{
@@ -124,7 +257,7 @@ export default function Home() {
             height: "56px", fontSize: "16px",
             borderRadius: "20px",
           }}>
-            
+
             🚩 创建新房间
           </button>
         </div>
@@ -144,10 +277,12 @@ export default function Home() {
               }}>🐡</div>
               <div>
                 <div style={{ fontWeight: 800, fontSize: "15px", color: "var(--brown)" }}>
-                  未连接钱包
+                  {wallet.address
+                    ? `${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`
+                    : "未连接钱包"}
                 </div>
                 <div style={{ fontSize: "12px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  连接后查看战绩
+                  {wallet.address ? "已连接" : "连接后查看战绩"}
                 </div>
               </div>
             </div>

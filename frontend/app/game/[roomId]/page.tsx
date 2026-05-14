@@ -1,6 +1,9 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { useContract } from "@/lib/ethereum";
+import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES, TIER_NAMES, RARITY_NAMES, PLAYER_STATUS } from "@/lib/contract";
+import { ethers } from "ethers";
 
 // ── 游戏状态枚举 ─────────────────────────────────────────
 type GamePhase =
@@ -78,16 +81,170 @@ function randomFish(): FishResult {
   return { name, rarity, weight, score, emoji: db.emoji };
 }
 
+function contractStatusToDisplay(status: number): OtherPlayer["status"] {
+  // PLAYER_STATUS = ["Fishing", "LockedIn", "Recast"]
+  switch (status) {
+    case 0: return "fishing";
+    case 1: return "locked";
+    case 2: return "fishing"; // Recast maps to fishing visually
+    default: return "waiting";
+  }
+}
+
+function shortenAddress(addr: string): string {
+  if (!addr || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 // ── 主组件 ───────────────────────────────────────────────
-export default function GameScreen() {
+export default function GameScreenPage() {
+  return (
+    <Suspense>
+      <GameScreen />
+    </Suspense>
+  );
+}
+
+function GameScreen() {
   const router = useRouter();
+  const params = useParams();
+  const roomId = params.roomId as string;
+
+  const { wallet, getReadContract, getWriteContract } = useContract();
+  const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
+
   const [phase, setPhase] = useState<GamePhase>("waiting_cast");
   const [fish, setFish] = useState<FishResult | null>(null);
   const [castCount, setCastCount] = useState(0);
-  const [totalPot] = useState(0.038);
+  const [totalPot, setTotalPot] = useState(0.038);
   const [timeLeft, setTimeLeft] = useState(180);
   const [buffs, setBuffs] = useState<string[]>([]);
   const [diceResult, setDiceResult] = useState<{ text: string; isBuff: boolean } | null>(null);
+  const [others, setOthers] = useState<OtherPlayer[]>(MOCK_OTHERS);
+  const [recastFee, setRecastFee] = useState("0.01");
+  const [txPending, setTxPending] = useState(false);
+
+  // Fetch room data from contract (pot, recast fee, other players)
+  const fetchGameData = useCallback(async () => {
+    if (!isContractReady || !roomId) return;
+    const contract = getReadContract();
+    if (!contract) return;
+
+    try {
+      const info = await contract.getRoomInfo(Number(roomId));
+      const pot = ethers.formatEther(info.totalPot);
+      setTotalPot(parseFloat(pot));
+
+      // Determine recast fee from tier
+      const tierIndex = Number(info.tier);
+      const tierName = TIER_NAMES[tierIndex];
+      if (tierName && tierName in TIER_ENTRY_FEES) {
+        setRecastFee(TIER_ENTRY_FEES[tierName as keyof typeof TIER_ENTRY_FEES]);
+      }
+
+      // Fetch other players
+      const pCount = Number(info.playerCount);
+      const otherPlayers: OtherPlayer[] = [];
+      for (let i = 0; i < pCount; i++) {
+        try {
+          const pInfo = await contract.getPlayerInfo(Number(roomId), i);
+          if (pInfo.addr.toLowerCase() === wallet.address!.toLowerCase()) continue;
+          otherPlayers.push({
+            ens: shortenAddress(pInfo.addr),
+            status: Number(pInfo.score) > 0 && Number(pInfo.status) === 1
+              ? "locked"
+              : Number(pInfo.score) > 0
+              ? "caught"
+              : contractStatusToDisplay(Number(pInfo.status)),
+            score: Number(pInfo.score),
+          });
+        } catch {
+          // Skip
+        }
+      }
+      if (otherPlayers.length > 0) {
+        setOthers(otherPlayers);
+      }
+    } catch {
+      // Keep mock data
+    }
+  }, [isContractReady, roomId, getReadContract, wallet.address]);
+
+  useEffect(() => {
+    fetchGameData();
+  }, [fetchGameData]);
+
+  // Listen for contract events
+  useEffect(() => {
+    if (!isContractReady || !roomId) return;
+    const contract = getReadContract();
+    if (!contract) return;
+
+    const roomIdNum = Number(roomId);
+
+    const onFishCaught = (eventRoomId: bigint, _player: string, rarity: number, weight: bigint, score: bigint) => {
+      if (Number(eventRoomId) !== roomIdNum) return;
+      if (_player.toLowerCase() === wallet.address!.toLowerCase()) {
+        const rarityName = RARITY_NAMES[rarity] as Rarity;
+        const db = FISH_DB[rarityName] || FISH_DB.Common;
+        const fishName = db.names[Math.floor(Math.random() * db.names.length)];
+        const w = Number(weight) / 10; // assuming weight is stored as x10
+        setFish({
+          name: fishName,
+          rarity: rarityName,
+          weight: w,
+          score: Number(score),
+          emoji: db.emoji,
+        });
+        setPhase("fish_result");
+        setTimeout(() => setPhase("decision"), 1200);
+      } else {
+        fetchGameData();
+      }
+    };
+
+    const onPlayerLockedIn = (eventRoomId: bigint) => {
+      if (Number(eventRoomId) === roomIdNum) {
+        fetchGameData();
+      }
+    };
+
+    const onDiceRolled = (eventRoomId: bigint, player: string, diceModifier: bigint) => {
+      if (Number(eventRoomId) !== roomIdNum) return;
+      if (player.toLowerCase() === wallet.address!.toLowerCase()) {
+        const mod = Number(diceModifier);
+        const isBuff = mod >= 0;
+        setDiceResult({
+          text: isBuff ? `加成 +${mod}%` : `减益 ${mod}%`,
+          isBuff,
+        });
+        setBuffs(prev => [...prev, isBuff ? "⬆️" : "⬇️"]);
+        setCastCount(c => c + 1);
+        setTimeout(() => {
+          setDiceResult(null);
+          setPhase("waiting_cast");
+        }, 2500);
+      }
+    };
+
+    const onGameSettled = (eventRoomId: bigint) => {
+      if (Number(eventRoomId) === roomIdNum) {
+        router.push(`/settlement?roomId=${roomId}`);
+      }
+    };
+
+    contract.on("FishCaught", onFishCaught);
+    contract.on("PlayerLockedIn", onPlayerLockedIn);
+    contract.on("DiceRolled", onDiceRolled);
+    contract.on("GameSettled", onGameSettled);
+
+    return () => {
+      contract.off("FishCaught", onFishCaught);
+      contract.off("PlayerLockedIn", onPlayerLockedIn);
+      contract.off("DiceRolled", onDiceRolled);
+      contract.off("GameSettled", onGameSettled);
+    };
+  }, [isContractReady, roomId, getReadContract, wallet.address, fetchGameData, router]);
 
   // 倒计时
   useEffect(() => {
@@ -97,45 +254,125 @@ export default function GameScreen() {
   }, [phase]);
 
   // 抛竿
-  const handleCast = useCallback(() => {
-    if (phase !== "waiting_cast") return;
-    setPhase("waiting_vrf");
-    setTimeout(() => setPhase("reeling"), 2000);
-  }, [phase]);
+  const handleCast = useCallback(async () => {
+    if (phase !== "waiting_cast" || txPending) return;
 
-  // 收竿结果
+    if (!isContractReady || !roomId) {
+      // Mock fallback
+      setPhase("waiting_vrf");
+      setTimeout(() => setPhase("reeling"), 2000);
+      return;
+    }
+
+    const contract = getWriteContract();
+    if (!contract) return;
+
+    setTxPending(true);
+    setPhase("waiting_vrf");
+    try {
+      const tx = await contract.cast(Number(roomId));
+      await tx.wait();
+      // Wait for FishCaught event to update fish result
+      // If VRF is async, we stay in waiting_vrf until the event fires
+      // Set a fallback timeout to show reeling bar if event doesn't come quickly
+      setTimeout(() => {
+        setPhase(prev => prev === "waiting_vrf" ? "reeling" : prev);
+      }, 5000);
+    } catch {
+      setPhase("waiting_cast");
+    } finally {
+      setTxPending(false);
+    }
+  }, [phase, txPending, isContractReady, roomId, getWriteContract]);
+
+  // 收竿结果 (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
     if (result === "miss") {
       setPhase("waiting_cast");
       return;
     }
-    const f = randomFish();
-    setFish(f);
-    setPhase("fish_result");
-    setTimeout(() => setPhase("decision"), 1200);
-  }, []);
+    // In contract mode, FishCaught event sets the fish.
+    // In mock mode, generate random fish.
+    if (!isContractReady) {
+      const f = randomFish();
+      setFish(f);
+      setPhase("fish_result");
+      setTimeout(() => setPhase("decision"), 1200);
+    } else {
+      // If we reach reeling in contract mode (fallback timeout),
+      // generate a local fish as placeholder
+      const f = randomFish();
+      setFish(f);
+      setPhase("fish_result");
+      setTimeout(() => setPhase("decision"), 1200);
+    }
+  }, [isContractReady]);
 
   // 锁定
-  const handleLockIn = () => {
-    setPhase("locked");
-    setTimeout(() => router.push("/settlement"), 2000);
+  const handleLockIn = async () => {
+    if (!isContractReady || !roomId) {
+      setPhase("locked");
+      setTimeout(() => router.push("/settlement"), 2000);
+      return;
+    }
+
+    const contract = getWriteContract();
+    if (!contract) return;
+
+    setTxPending(true);
+    try {
+      const tx = await contract.lockIn(Number(roomId));
+      await tx.wait();
+      setPhase("locked");
+      // GameSettled event will navigate to settlement
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "锁定失败";
+      alert(msg);
+    } finally {
+      setTxPending(false);
+    }
   };
 
   // 重投
-  const handleRecast = () => {
+  const handleRecast = async () => {
     if (castCount >= 3) return;
-    setPhase("dice_roll");
+
+    if (!isContractReady || !roomId) {
+      setPhase("dice_roll");
+      return;
+    }
+
+    const contract = getWriteContract();
+    if (!contract) return;
+
+    setTxPending(true);
+    try {
+      const tx = await contract.recast(Number(roomId), {
+        value: ethers.parseEther(recastFee),
+      });
+      await tx.wait();
+      setPhase("dice_roll");
+      // DiceRolled event will update the dice result
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "重投失败";
+      alert(msg);
+    } finally {
+      setTxPending(false);
+    }
   };
 
-  // 骰子结果
+  // 骰子结果 (mock fallback)
   const handleDiceFinish = (buff: { text: string; isBuff: boolean }) => {
-    setDiceResult(buff);
-    setBuffs(prev => [...prev, buff.isBuff ? "⬆️" : "⬇️"]);
-    setCastCount(c => c + 1);
-    setTimeout(() => {
-      setDiceResult(null);
-      setPhase("waiting_cast");
-    }, 2500);
+    if (!isContractReady) {
+      setDiceResult(buff);
+      setBuffs(prev => [...prev, buff.isBuff ? "⬆️" : "⬇️"]);
+      setCastCount(c => c + 1);
+      setTimeout(() => {
+        setDiceResult(null);
+        setPhase("waiting_cast");
+      }, 2500);
+    }
+    // In contract mode, DiceRolled event handles this
   };
 
   return (
@@ -144,7 +381,7 @@ export default function GameScreen() {
       overflow: "hidden", position: "relative",
       background: "linear-gradient(180deg, #87CEEB 0%, #B8E4F9 35%, #4A9DB5 60%, #2E6B8A 100%)",
     }}
-    onClick={phase === "waiting_cast" ? handleCast : undefined}
+    onClick={phase === "waiting_cast" && !txPending ? handleCast : undefined}
     >
       {/* 背景层 */}
       <GameBackground />
@@ -157,7 +394,7 @@ export default function GameScreen() {
       />
 
       {/* 右侧玩家状态 */}
-      <PlayerSidebar players={MOCK_OTHERS} />
+      <PlayerSidebar players={others} />
 
       {/* 左侧 Buff 区 */}
       {buffs.length > 0 && <BuffArea buffs={buffs} />}
@@ -170,11 +407,16 @@ export default function GameScreen() {
         onLockIn={handleLockIn}
         onRecast={handleRecast}
         castCount={castCount}
+        recastFee={recastFee}
+        txPending={txPending}
       />
 
       {/* 骰子弹窗 */}
-      {phase === "dice_roll" && (
+      {phase === "dice_roll" && !isContractReady && (
         <DiceModal onFinish={handleDiceFinish} recastNumber={castCount + 1} />
+      )}
+      {phase === "dice_roll" && isContractReady && (
+        <DiceModalContract diceResult={diceResult} recastNumber={castCount + 1} />
       )}
     </div>
   );
@@ -377,13 +619,15 @@ function BuffArea({ buffs }: { buffs: string[] }) {
 }
 
 // ── 中央游戏区 ───────────────────────────────────────────
-function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount }: {
+function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recastFee, txPending }: {
   phase: GamePhase;
   fish: FishResult | null;
   onReel: (r: "perfect" | "good" | "ok" | "miss") => void;
   onLockIn: () => void;
   onRecast: () => void;
   castCount: number;
+  recastFee: string;
+  txPending: boolean;
 }) {
   return (
     <div style={{
@@ -391,7 +635,7 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount }: {
       top: "64px", left: 0, right: "192px", bottom: 0,
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
-      {phase === "waiting_cast" && <WaitingCastUI />}
+      {phase === "waiting_cast" && <WaitingCastUI txPending={txPending} />}
       {phase === "waiting_vrf"  && <WaitingVRFUI />}
       {phase === "reeling"      && <ReelingBar onResult={onReel} />}
       {(phase === "fish_result" || phase === "decision") && fish && (
@@ -402,7 +646,8 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount }: {
               onLockIn={onLockIn}
               onRecast={onRecast}
               castCount={castCount}
-              recastFee="0.01"
+              recastFee={recastFee}
+              txPending={txPending}
             />
           )}
         </div>
@@ -428,7 +673,7 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount }: {
 }
 
 // ── 等待抛竿 UI ──────────────────────────────────────────
-function WaitingCastUI() {
+function WaitingCastUI({ txPending }: { txPending: boolean }) {
   return (
     <div style={{ textAlign: "center" }}>
       {/* 鱼影 */}
@@ -460,20 +705,21 @@ function WaitingCastUI() {
         border: "3px dashed rgba(255,123,107,0.6)",
         display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
-        cursor: "pointer",
+        cursor: txPending ? "wait" : "pointer",
         animation: "pulse-glow 2s ease-in-out infinite",
         backdropFilter: "blur(4px)",
         margin: "0 auto",
+        opacity: txPending ? 0.6 : 1,
       }}>
         <span style={{ fontSize: "48px", marginBottom: "4px" }}>🎣</span>
         <span style={{
           fontWeight: 800, fontSize: "15px", color: "white",
           textShadow: "0 1px 4px rgba(0,0,0,0.3)",
-        }}>点击抛竿</span>
+        }}>{txPending ? "发送中..." : "点击抛竿"}</span>
         <span style={{
           fontSize: "11px", color: "rgba(255,255,255,0.7)",
           marginTop: "2px",
-        }}>点击画面任意位置</span>
+        }}>{txPending ? "等待交易确认" : "点击画面任意位置"}</span>
       </div>
     </div>
   );
@@ -722,11 +968,12 @@ function FishCard({ fish }: { fish: FishResult }) {
 }
 
 // ── 决策按钮 ─────────────────────────────────────────────
-function DecisionButtons({ onLockIn, onRecast, castCount, recastFee }: {
+function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }: {
   onLockIn: () => void;
   onRecast: () => void;
   castCount: number;
   recastFee: string;
+  txPending: boolean;
 }) {
   const canRecast = castCount < 3;
   return (
@@ -734,21 +981,23 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee }: {
       display: "flex", gap: "12px",
       animation: "bounce-in 0.4s ease forwards",
     }}>
-      <button className="btn-primary" onClick={onLockIn} style={{
+      <button className="btn-primary" onClick={onLockIn} disabled={txPending} style={{
         background: "linear-gradient(135deg, #4CAF50, #388E3C)",
         boxShadow: "0 4px 12px rgba(76,175,80,0.4)",
         padding: "14px 24px", fontSize: "14px",
         borderRadius: "16px", minWidth: "140px",
+        opacity: txPending ? 0.6 : 1,
       }}>
-        今天就钓这条！✨
+        {txPending ? "确认中..." : "今天就钓这条！✨"}
       </button>
 
       {canRecast && (
-        <button className="btn-primary" onClick={onRecast} style={{
+        <button className="btn-primary" onClick={onRecast} disabled={txPending} style={{
           padding: "14px 24px", fontSize: "14px",
           borderRadius: "16px", minWidth: "140px",
+          opacity: txPending ? 0.6 : 1,
         }}>
-          <div>再试一次 🎣</div>
+          <div>{txPending ? "确认中..." : "再试一次 🎣"}</div>
           <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>
             +{recastFee} ETH
           </div>
@@ -758,7 +1007,7 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee }: {
   );
 }
 
-// ── 骰子弹窗 ─────────────────────────────────────────────
+// ── 骰子弹窗 (Mock fallback) ────────────────────────────
 function DiceModal({ onFinish, recastNumber }: {
   onFinish: (buff: { text: string; isBuff: boolean }) => void;
   recastNumber: number;
@@ -836,6 +1085,65 @@ function DiceModal({ onFinish, recastNumber }: {
             </div>
           </>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ── 骰子弹窗 (Contract mode - waits for DiceRolled event) ──
+function DiceModalContract({ diceResult, recastNumber }: {
+  diceResult: { text: string; isBuff: boolean } | null;
+  recastNumber: number;
+}) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.5)",
+      backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 200,
+    }}>
+      <div style={{
+        background: "white", borderRadius: "32px",
+        padding: "32px", width: "320px", textAlign: "center",
+        animation: "bounce-in 0.4s ease forwards",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+      }}>
+        <div style={{
+          fontSize: "13px", fontWeight: 700,
+          color: "var(--brown-light)", marginBottom: "16px",
+          textTransform: "uppercase", letterSpacing: "0.08em",
+        }}>
+          第 {recastNumber} 次重投骰子
+        </div>
+
+        {!diceResult ? (
+          <>
+            <div style={{ fontSize: "72px", animation: "spin 0.3s linear infinite" }}>🎲</div>
+            <div style={{
+              marginTop: "16px", fontSize: "14px",
+              color: "var(--brown-light)", fontWeight: 600,
+            }}>命运的骰子滚动中...</div>
+          </>
+        ) : (
+          <>
+            <div style={{
+              fontSize: "64px", marginBottom: "12px",
+              animation: "bounce-in 0.4s ease forwards",
+            }}>{diceResult.isBuff ? "🌟" : "💀"}</div>
+            <div style={{
+              fontSize: "20px", fontWeight: 900,
+              color: diceResult.isBuff ? "#4CAF50" : "#F44336",
+              animation: "bounce-in 0.4s ease forwards",
+            }}>{diceResult.text}</div>
+            <div style={{
+              fontSize: "12px", color: "var(--brown-light)",
+              marginTop: "8px",
+            }}>
+              {diceResult.isBuff ? "好运降临！✨" : "运气不佳，但还能逆风翻盘！"}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

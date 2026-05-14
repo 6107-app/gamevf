@@ -1,17 +1,26 @@
 "use client";
-import { useState } from "react";
 
-export default function Navbar() {
-  const [connected, setConnected] = useState(false);
-  const [address, setAddress] = useState("");
+interface NavbarProps {
+  walletAddress?: string | null;
+  isConnecting?: boolean;
+  onConnect?: () => void;
+}
 
-  const connectWallet = async () => {
+export default function Navbar({ walletAddress, isConnecting, onConnect }: NavbarProps) {
+  const connected = !!walletAddress;
+
+  const handleConnect = async () => {
+    if (onConnect) {
+      onConnect();
+      return;
+    }
+    // Fallback: standalone wallet connect (for pages that don't pass props)
     if (typeof window !== "undefined" && (window as any).ethereum) {
       const accounts = await (window as any).ethereum.request({
         method: "eth_requestAccounts",
       });
-      setAddress(accounts[0]);
-      setConnected(true);
+      // No-op in standalone mode since we can't set parent state
+      void accounts;
     } else {
       alert("请安装 MetaMask 🦊");
     }
@@ -64,13 +73,14 @@ export default function Navbar() {
           <span style={{
             fontWeight: 700, fontSize: "13px", color: "var(--brown)",
           }}>
-            {address.slice(0, 6)}...{address.slice(-4)}
+            {walletAddress!.slice(0, 6)}...{walletAddress!.slice(-4)}
           </span>
         </div>
       ) : (
-        <button className="btn-primary" onClick={connectWallet}
-          style={{ padding: "10px 20px", fontSize: "14px" }}>
-          连接钱包 🎣
+        <button className="btn-primary" onClick={handleConnect}
+          disabled={isConnecting}
+          style={{ padding: "10px 20px", fontSize: "14px", opacity: isConnecting ? 0.7 : 1 }}>
+          {isConnecting ? "连接中..." : "连接钱包 🎣"}
         </button>
       )}
     </nav>
