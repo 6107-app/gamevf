@@ -12,7 +12,9 @@ interface WalletState {
   error: string | null;
 }
 
+const LOCAL_CHAIN_ID = 31337;
 const SEPOLIA_CHAIN_ID = 11155111;
+const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID) || SEPOLIA_CHAIN_ID;
 
 export function useWallet() {
   const [state, setState] = useState<WalletState>({
@@ -53,23 +55,24 @@ export function useWallet() {
     }
   }, []);
 
-  const switchToSepolia = useCallback(async () => {
+  const switchToLocalNetwork = useCallback(async () => {
     if (!window.ethereum) return;
     try {
       await window.ethereum.request({
         method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0x" + SEPOLIA_CHAIN_ID.toString(16) }],
+        params: [{ chainId: "0x" + TARGET_CHAIN_ID.toString(16) }],
       });
     } catch (e: unknown) {
       if ((e as { code?: number }).code === 4902) {
         await window.ethereum.request({
           method: "wallet_addEthereumChain",
           params: [{
-            chainId: "0x" + SEPOLIA_CHAIN_ID.toString(16),
-            chainName: "Sepolia Testnet",
-            rpcUrls: ["https://rpc.sepolia.org"],
+            chainId: "0x" + TARGET_CHAIN_ID.toString(16),
+            chainName: TARGET_CHAIN_ID === LOCAL_CHAIN_ID ? "Anvil Local" : "Sepolia Testnet",
+            rpcUrls: [TARGET_CHAIN_ID === LOCAL_CHAIN_ID
+              ? "http://127.0.0.1:8545"
+              : "https://rpc.sepolia.org"],
             nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-            blockExplorerUrls: ["https://sepolia.etherscan.io"],
           }],
         });
       }
@@ -95,7 +98,7 @@ export function useWallet() {
     };
   }, [connect]);
 
-  return { ...state, connect, switchToSepolia };
+  return { ...state, connect, switchToLocalNetwork };
 }
 
 export function useContract() {
