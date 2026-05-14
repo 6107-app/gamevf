@@ -1,19 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
 import RodDurabilityBar from "@/components/rods/RodDurabilityBar";
 import { generateMockRods, ROD_TYPES, ROD_MAX_LEVEL, REPAIR_FEES, UPGRADE_FEES, getUpgradeSuccessRate, getRodStatus } from "@/lib/rod";
 
-interface RodDetailPageProps {
-  params: { tokenId: string };
-}
-
-export default function RodDetailPage({ params }: RodDetailPageProps) {
+export default function RodDetailPage() {
   const router = useRouter();
-  const tokenId = parseInt(params.tokenId);
+  const params = useParams();
+  const tokenId = parseInt(params.tokenId as string);
   const allRods = generateMockRods();
   const rod = allRods.find(r => r.tokenId === tokenId);
 
