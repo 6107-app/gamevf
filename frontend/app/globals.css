@@ -129,3 +129,138 @@ body {
 .animate-float      { animation: float 3s ease-in-out infinite; }
 .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
 .animate-marquee    { animation: marquee 30s linear infinite; }
+
+/* ── 鱼竿系统相关样式 ── */
+:root {
+  /* 鱼竿稀有度颜色 */
+  --rarity-common:     #A8A8A8;  /* Common: 灰色 */
+  --rarity-rare:       #1E90FF;  /* Rare: 蓝色 */
+  --rarity-super:      #9932CC;  /* SuperRare: 紫色 */
+  --rarity-epic:       #FFD700;  /* Epic: 金色 */
+  --rarity-legendary:  #FF69B4;  /* Legendary: 粉色/红色 */
+
+  /* 鱼竿等级背景 */
+  --rod-bg-common:     #F5F5F5;
+  --rod-bg-rare:       #E6F2FF;
+  --rod-bg-epic:       #FFF9E6;
+  --rod-bg-legendary:  #FFE6F0;
+}
+
+.rod-rarity-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.rod-rarity-common {
+  background: rgba(168, 168, 168, 0.2);
+  color: #5A5A5A;
+}
+
+.rod-rarity-rare {
+  background: rgba(30, 144, 255, 0.2);
+  color: #1E90FF;
+}
+
+.rod-rarity-super {
+  background: rgba(153, 50, 204, 0.2);
+  color: #9932CC;
+}
+
+.rod-rarity-epic {
+  background: rgba(255, 215, 0, 0.2);
+  color: #D4A000;
+}
+
+.rod-rarity-legendary {
+  background: rgba(255, 105, 180, 0.2);
+  color: #FF1493;
+}
+
+/* 耐久条 */
+.rod-durability-bar {
+  width: 100%;
+  height: 8px;
+  background: #E8E8E8;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.rod-durability-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #A5D6A7, #66BB6A);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.rod-durability-low {
+  background: linear-gradient(90deg, #FFB74D, #FFA726) !important;
+}
+
+.rod-durability-critical {
+  background: linear-gradient(90deg, #EF5350, #E53935) !important;
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+/* 鱼竿卡片 */
+.rod-card {
+  background: white;
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.rod-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+
+/* 等级标签 */
+.rod-level-tag {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
+  color: white;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-left: 8px;
+}
+
+/* 升级进度 */
+.rod-upgrade-progress {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rod-upgrade-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #E0E0E0;
+  transition: background 0.3s ease;
+}
+
+.rod-upgrade-dot.active {
+  background: var(--coral);
+  box-shadow: 0 0 8px rgba(255, 123, 107, 0.6);
+}
+
+/* 购买/维护按钮状态 */
+.btn-locked {
+  background: #CCC;
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-locked:hover {
+  transform: none;
+  box-shadow: none;
+}

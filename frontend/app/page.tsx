@@ -310,41 +310,76 @@ export default function Home() {
           </div>
 
           {/* 我的鱼竿 */}
-          <div className="card" style={{ padding: "20px" }}>
+          <button 
+            onClick={() => router.push("/rods")}
+            className="card" 
+            style={{ 
+              padding: "20px",
+              background: "white",
+              border: "none",
+              cursor: "pointer",
+              transition: "transform 0.2s ease, box-shadow 0.2s ease",
+              width: "100%",
+              textAlign: "left",
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.transform = "translateY(-4px)";
+              (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-hover)";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+              (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-card)";
+            }}
+          >
             <div style={{
-              fontWeight: 800, fontSize: "14px",
-              color: "var(--brown)", marginBottom: "12px",
-            }}>🎣 我的鱼竿</div>
-            {[
-              { name: "Standard Rod", level: "+0", durability: 80 },
-              { name: "Speed Rod", level: "+2", durability: 45 },
-            ].map(rod => (
-              <div key={rod.name} style={{
-                background: "var(--cream)",
-                borderRadius: "12px", padding: "10px 12px",
-                marginBottom: "8px",
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-              }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--brown)" }}>
-                    {rod.name} <span style={{ color: "var(--coral)", fontSize: "11px" }}>{rod.level}</span>
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              marginBottom: "12px",
+            }}>
+              <div style={{
+                fontSize: "28px",
+              }}>🎣</div>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontWeight: 800, fontSize: "14px",
+                  color: "var(--brown)", marginBottom: "2px",
+                }}>我的鱼竿库</div>
+                <div style={{
+                  fontSize: "11px",
+                  color: "var(--brown-light)",
+                }}>点击查看并管理你的所有鱼竿</div>
+              </div>
+              <div style={{
+                fontSize: "18px",
+              }}>→</div>
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "8px",
+            }}>
+              {[
+                { icon: "🎣", label: "标准竿", level: "+0" },
+                { icon: "⚡", label: "速度竿", level: "+2" },
+              ].map(item => (
+                <div key={item.label} style={{
+                  background: "var(--cream)",
+                  borderRadius: "8px",
+                  padding: "8px",
+                  textAlign: "center",
+                }}>
+                  <div style={{ fontSize: "16px", marginBottom: "2px" }}>{item.icon}</div>
+                  <div style={{ fontSize: "10px", fontWeight: 600, color: "var(--brown)" }}>
+                    {item.label}
                   </div>
-                  {/* 耐久爱心条 */}
-                  <div style={{ display: "flex", gap: "2px", marginTop: "4px" }}>
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <span key={i} style={{
-                        fontSize: "10px",
-                        opacity: i < Math.ceil(rod.durability / 20) ? 1 : 0.25,
-                      }}>❤️</span>
-                    ))}
+                  <div style={{ fontSize: "9px", color: "var(--coral)" }}>
+                    {item.level}
                   </div>
                 </div>
-                <span style={{ fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
-                  {rod.durability}%
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </button>
 
           {/* 推荐好友 */}
           <div className="card" style={{ padding: "20px" }}>
