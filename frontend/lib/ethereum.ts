@@ -79,6 +79,20 @@ export function useWallet() {
     }
   }, []);
 
+  // 页面加载时自动重连
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.ethereum) return;
+    window.ethereum
+      .request({ method: "eth_accounts" })
+      .then((result) => {
+        const accounts = result as string[];
+        if (accounts.length > 0) {
+          connect();
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined" || !window.ethereum) return;
     const handleAccountsChanged = (...args: unknown[]) => {
