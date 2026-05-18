@@ -6,6 +6,7 @@ import RoomCard from "@/components/lobby/RoomCard";
 import { useState, useEffect, useCallback } from "react";
 import { useContract } from "@/lib/ethereum";
 import { FISHING_GAME_ADDRESS, TIER_NAMES, ROOM_STATUS, TIER_ENTRY_FEES } from "@/lib/contract";
+import { ROD_TYPES } from "@/lib/rod";
 import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
@@ -359,11 +360,8 @@ export default function Home() {
               gridTemplateColumns: "1fr 1fr",
               gap: "8px",
             }}>
-              {[
-                { icon: "🎣", label: "标准竿", level: "+0" },
-                { icon: "⚡", label: "速度竿", level: "+2" },
-              ].map(item => (
-                <div key={item.label} style={{
+              {(Object.values(ROD_TYPES) as Array<(typeof ROD_TYPES)[keyof typeof ROD_TYPES]>).map((item, index) => (
+                <div key={item.name} style={{
                   background: "var(--cream)",
                   borderRadius: "8px",
                   padding: "8px",
@@ -371,10 +369,10 @@ export default function Home() {
                 }}>
                   <div style={{ fontSize: "16px", marginBottom: "2px" }}>{item.icon}</div>
                   <div style={{ fontSize: "10px", fontWeight: 600, color: "var(--brown)" }}>
-                    {item.label}
+                    {item.name}
                   </div>
                   <div style={{ fontSize: "9px", color: "var(--coral)" }}>
-                    {item.level}
+                    {index === 0 ? "+0" : index === 1 ? "+2" : index === 2 ? "+1" : "+3"}
                   </div>
                 </div>
               ))}

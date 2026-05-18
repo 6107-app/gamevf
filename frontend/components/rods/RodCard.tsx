@@ -3,6 +3,13 @@
 import { RodData, ROD_TYPES, ROD_RARITY_COLORS, ROD_MAX_LEVEL } from "@/lib/rod";
 import RodDurabilityBar from "./RodDurabilityBar";
 
+const ATTRIBUTE_LABELS = [
+  { key: "speedBonus", label: "Speed", hint: "降低时间消耗", color: "#8B6355" },
+  { key: "weightBonus", label: "Weight", hint: "提高鱼重量区间", color: "#8B6355" },
+  { key: "luckBonus", label: "Luck", hint: "提高稀有度概率", color: "#8B6355" },
+  { key: "stabilityBps", label: "Stability", hint: "降低空杆/Debuff影响", color: "#8B6355" },
+] as const;
+
 interface RodCardProps {
   rod: RodData;
   onClick?: () => void;
@@ -185,54 +192,39 @@ export default function RodCard({
         </div>
         <div style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
           gap: "8px",
         }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{
-              fontSize: "11px",
-              color: "var(--brown-light)",
-            }}>
-              速度
-            </div>
-            <div style={{
-              fontSize: "14px",
-              fontWeight: 700,
-              color: rod.attributes.speedBonus < 0 ? "#FFB74D" : "#8B6355",
-            }}>
-              {rod.attributes.speedBonus < 0 ? "-" : "+"}{Math.abs(rod.attributes.speedBonus)}%
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{
-              fontSize: "11px",
-              color: "var(--brown-light)",
-            }}>
-              重量
-            </div>
-            <div style={{
-              fontSize: "14px",
-              fontWeight: 700,
-              color: rod.attributes.weightBonus > 0 ? "#66BB6A" : "#8B6355",
-            }}>
-              +{rod.attributes.weightBonus}%
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{
-              fontSize: "11px",
-              color: "var(--brown-light)",
-            }}>
-              幸运
-            </div>
-            <div style={{
-              fontSize: "14px",
-              fontWeight: 700,
-              color: rod.attributes.luckBonus > 0 ? "#FFB74D" : "#8B6355",
-            }}>
-              +{rod.attributes.luckBonus}%
-            </div>
-          </div>
+          {ATTRIBUTE_LABELS.map(attr => {
+            const rawValue =
+              attr.key === "stabilityBps"
+                ? Math.round((rod.attributes.stabilityBps ?? 0) / 100)
+                : Number((rod.attributes as any)[attr.key] ?? 0);
+            return (
+              <div key={attr.label} style={{ textAlign: "center" }}>
+                <div style={{
+                  fontSize: "11px",
+                  color: "var(--brown-light)",
+                }}>
+                  {attr.label}
+                </div>
+                <div style={{
+                  fontSize: "12px",
+                  color: "var(--brown-light)",
+                  marginBottom: "2px",
+                }}>
+                  {attr.hint}
+                </div>
+                <div style={{
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  color: rawValue > 0 ? attr.color : "#8B6355",
+                }}>
+                  +{rawValue}%
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

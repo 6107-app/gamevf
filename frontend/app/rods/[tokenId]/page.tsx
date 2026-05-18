@@ -1,22 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
 import RodDurabilityBar from "@/components/rods/RodDurabilityBar";
-import { generateMockRods, ROD_TYPES, ROD_MAX_LEVEL, REPAIR_FEES, UPGRADE_FEES, getUpgradeSuccessRate, getRodStatus } from "@/lib/rod";
+import { generateMockRods, ROD_TYPES, ROD_MAX_LEVEL, ROD_USE_BEFORE_REPAIR, getUpgradeSuccessRate, getRodStatus, type RodData } from "@/lib/rod";
+import { ethers } from "ethers";
+import { getFullRepairCost, getPartialRepairCost, getUpgradeFee, repairFullOnChain, repairPartialOnChain, upgradeOnChain, simulateRepairFull, simulateUpgrade, getRodOnChain, watchUpgradeResolved } from "@/lib/fishingRod";
+import { getFullRepairCostLocal, getUpgradeFeeLocal, ROD_CONFIG } from '@/lib/rod';
+
+const REPAIR_PLANS = [
+  { restore: 10, label: "+10", ratioLabel: "15%" },
+  { restore: 25, label: "+25", ratioLabel: "35%" },
+  { restore: 50, label: "+50", ratioLabel: "60%" },
+  { restore: 100, label: "Full Repair", ratioLabel: "100%" },
+] as const;
 
 export default function RodDetailPage() {
   const router = useRouter();
   const params = useParams();
   const tokenId = parseInt(params.tokenId as string);
   const allRods = generateMockRods();
-  const rod = allRods.find(r => r.tokenId === tokenId);
+  const initial = allRods.find(r => r.tokenId === tokenId) ?? null;
 
+  const [rod, setRod] = useState<RodData | null>(initial as RodData | null);
   const [showRepairModal, setShowRepairModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [repairQuotes, setRepairQuotes] = useState<Record<number, string>>({});
 
   if (!rod) {
     return (
@@ -41,35 +53,194 @@ export default function RodDetailPage() {
     );
   }
 
+  // Fetch on-chain rod data and subscribe to upgrade events
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    const fetch = async () => {
+      try {
+        const provider = typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        const onChain = await getRodOnChain(tokenId, provider);
+        if (onChain) setRod(onChain);
+        // subscribe to upgrade events to refresh on result
+        unsub = watchUpgradeResolved(provider, async (tid, success) => {
+          if (tid === tokenId) {
+            const updated = await getRodOnChain(tokenId, provider);
+            if (updated) setRod(updated);
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetch();
+    return () => { if (unsub) unsub(); };
+  }, [tokenId]);
+
   const rodType = ROD_TYPES[rod.type];
   const canUpgrade = rod.level < ROD_MAX_LEVEL;
   const needsRepair = getRodStatus(rod) !== "healthy";
-  const repairFee = REPAIR_FEES[rod.level];
-  const upgradeFee = canUpgrade ? UPGRADE_FEES[rod.level] : 0;
+  const [repairFee, setRepairFee] = useState<string | null>(null);
+  const [upgradeFee, setUpgradeFee] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchFees = async () => {
+      try {
+        const provider = typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        let full: any = null;
+        let up: any = null;
+        try {
+          full = await getFullRepairCost(rod.tokenId, provider);
+        } catch (e) {
+          full = null;
+        }
+        try {
+          up = await getUpgradeFee(rod.level, provider);
+        } catch (e) {
+          up = null;
+        }
+
+        const partials: Record<number, string> = {};
+        for (const plan of REPAIR_PLANS) {
+          try {
+            const partialCost = plan.restore === 100
+              ? full
+              : await getPartialRepairCost(rod.tokenId, plan.restore, provider);
+            if (partialCost && partialCost.toString && partialCost.toString() !== '0') {
+              partials[plan.restore] = ethers.formatEther(partialCost);
+            } else {
+              partials[plan.restore] = plan.restore === 100
+                ? String(getFullRepairCostLocal(rod.type as any, rod.level))
+                : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.restore) / 100));
+            }
+          } catch (e) {
+            partials[plan.restore] = plan.restore === 100
+              ? String(getFullRepairCostLocal(rod.type as any, rod.level))
+              : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.restore) / 100));
+          }
+        }
+
+        // If chain didn't return a cost, fall back to local config for display
+        if (full && full.toString && full.toString() !== '0') {
+          setRepairFee(ethers.formatEther(full));
+        } else {
+          // assume token cost units (not ETH) - display token amount
+          const local = getFullRepairCostLocal(rod.type as any, rod.level);
+          setRepairFee(String(local));
+        }
+
+        if (up && up.toString && up.toString() !== '0') {
+          setUpgradeFee(ethers.formatEther(up));
+        } else {
+          const u = getUpgradeFeeLocal(rod.level) ?? null;
+          setUpgradeFee(u ? String(u) : null);
+        }
+
+        setRepairQuotes(partials);
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchFees();
+  }, [rod.tokenId, rod.level]);
 
   const handleRepair = async () => {
+    const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
     setIsProcessing(true);
-    // 模拟维护过程
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      const provider = typeof window !== 'undefined' && (window as any).ethereum
+        ? new ethers.BrowserProvider((window as any).ethereum)
+        : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+      if (SIMULATE) {
+        const sim = await simulateRepairFull(rod.tokenId, provider);
+        alert(`模拟维护：费用 ${sim.price && sim.price.toString && sim.price.toString() !== '0' ? ethers.formatEther(sim.price) + ' ETH' : getFullRepairCostLocal(rod.type as any, rod.level) + ' tokens'}，估算 gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}`);
+        setIsProcessing(false);
+        setShowRepairModal(false);
+        return;
+      }
+      if (!(window as any).ethereum) return alert('请安装钱包');
+      const web3 = new ethers.BrowserProvider((window as any).ethereum);
+      await web3.send('eth_requestAccounts', []);
+      const signer = await web3.getSigner();
+      const tx = await repairFullOnChain(rod.tokenId, signer);
+      alert('交易已发出，等待上链');
+      await tx.wait();
+      alert('✅ 鱼竿维护成功！');
+    } catch (e: any) {
+      console.error(e);
+      const code = e?.code || e?.error?.code;
+      if (code === 4001) alert('用户已拒绝交易签名');
+      else alert('维护失败');
+    }
     setIsProcessing(false);
     setShowRepairModal(false);
-    alert(`✅ 鱼竿维护成功！耐久度已恢复至 100/100。`);
+  };
+
+  const handlePartialRepair = async (restore: number) => {
+    const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
+    setIsProcessing(true);
+    try {
+      const quoted = repairQuotes[restore] ?? '0';
+      if (SIMULATE) {
+        alert(`模拟部分维修：恢复 +${restore} 耐久，费用 ${quoted} ETH`);
+        setIsProcessing(false);
+        return;
+      }
+      if (!(window as any).ethereum) return alert('请安装钱包');
+      const web3 = new ethers.BrowserProvider((window as any).ethereum);
+      await web3.send('eth_requestAccounts', []);
+      const signer = await web3.getSigner();
+      const tx = restore === 100
+        ? await repairFullOnChain(rod.tokenId, signer)
+        : await repairPartialOnChain(rod.tokenId, restore, signer);
+      alert('交易已发出，等待上链');
+      await tx.wait();
+      alert(restore === 100 ? '✅ 鱼竿全量维修成功！' : '✅ 鱼竿部分维修成功！');
+    } catch (e: any) {
+      console.error(e);
+      const code = e?.code || e?.error?.code;
+      if (code === 4001) alert('用户已拒绝交易签名');
+      else alert('维修失败');
+    }
+    setIsProcessing(false);
+    setShowRepairModal(false);
   };
 
   const handleUpgrade = async () => {
+    const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
     setIsProcessing(true);
-    // 模拟升级过程
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const successRate = getUpgradeSuccessRate(rod.level);
-    const isSuccess = Math.random() * 100 < successRate;
+    try {
+      const provider = typeof window !== 'undefined' && (window as any).ethereum
+        ? new ethers.BrowserProvider((window as any).ethereum)
+        : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+      if (SIMULATE) {
+        const sim = await simulateUpgrade(rod.tokenId, rod.level, provider);
+        const simPriceStr = sim.price && sim.price.toString && sim.price.toString() !== '0' ? ethers.formatEther(sim.price) + ' ETH' : (getUpgradeFeeLocal(rod.level) ?? '0') + ' tokens';
+        const simulated = (sim as any).simulated;
+        alert(`模拟升级：费用 ${simPriceStr}，估算 gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}，可能属性：${simulated.attribute} +${simulated.incrementPercent}%`);
+        setIsProcessing(false);
+        setShowUpgradeModal(false);
+        return;
+      }
+      if (!(window as any).ethereum) return alert('请安装钱包');
+      const web3 = new ethers.BrowserProvider((window as any).ethereum);
+      await web3.send('eth_requestAccounts', []);
+      const signer = await web3.getSigner();
+      const tx = await upgradeOnChain(rod.tokenId, signer);
+      alert('交易已发出，等待上链');
+      await tx.wait();
+      alert('🔔 升级交易已完成，结果将由链上事件决定');
+    } catch (e: any) {
+      console.error(e);
+      const code = e?.code || e?.error?.code;
+      if (code === 4001) alert('用户已拒绝交易签名');
+      else alert('升级失败');
+    }
     setIsProcessing(false);
     setShowUpgradeModal(false);
-
-    if (isSuccess) {
-      alert(`🎉 升级成功！${rodType.name} 现已升至 +${rod.level + 1} 级！`);
-    } else {
-      alert(`❌ 升级失败。升级费 ${upgradeFee} ETH 已扣除，请重新尝试。`);
-    }
   };
 
   return (
@@ -238,7 +409,9 @@ export default function RodDetailPage() {
                   cursor: !needsRepair ? "not-allowed" : "pointer",
                 }}
               >
-                {isProcessing ? "维护中..." : `🔧 维护鱼竿 (${repairFee} ETH)`}
+                {isProcessing
+                  ? "维修中..."
+                  : `🔧 维修方案 (${repairFee ? (repairFee.match(/^\d+$/) ? repairFee + ' tokens' : repairFee + ' ETH') : '加载中...'})`}
               </button>
 
               {/* Upgrade Button */}
@@ -255,7 +428,7 @@ export default function RodDetailPage() {
                 {isProcessing
                   ? "升级中..."
                   : canUpgrade
-                    ? `⬆️ 升级至 +${rod.level + 1} (${upgradeFee} ETH)`
+                    ? `⬆️ 升级到 +${rod.level + 1} (${upgradeFee ? upgradeFee + ' ETH' : '加载中...'})`
                     : "✓ 已达到最高等级"}
               </button>
             </div>
@@ -275,7 +448,7 @@ export default function RodDetailPage() {
             color: "var(--brown)",
             marginBottom: "16px",
           }}>
-            ℹ️ 鱼竿说明
+            ℹ️ 鱼竿档案
           </div>
 
           <div style={{
@@ -289,7 +462,7 @@ export default function RodDetailPage() {
                 color: "var(--brown-light)",
                 marginBottom: "6px",
               }}>
-                特性描述
+                鱼竿类型
               </div>
               <p style={{
                 fontSize: "13px",
@@ -307,20 +480,26 @@ export default function RodDetailPage() {
                 color: "var(--brown-light)",
                 marginBottom: "6px",
               }}>
-                使用说明
+                四维属性
               </div>
-              <ul style={{
-                fontSize: "13px",
-                color: "var(--brown)",
-                lineHeight: "1.8",
-                paddingLeft: "20px",
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: "10px",
               }}>
-                <li>每使用 {10} 次鱼竿，耐久度会下降至无法使用</li>
-                <li>使用前请确保耐久度充足</li>
-                <li>维护费用会随着等级提升而增加</li>
-                <li>升级可以提升鱼竿的各项属性</li>
-                <li>升级失败不会扣除鱼竿等级，但升级费用不退还</li>
-              </ul>
+                {[
+                  { label: "Speed", value: `${rod.attributes.speedBonus ?? Math.round(rod.attributes.speedBps / 100)}%`, hint: "降低时间消耗" },
+                  { label: "Weight", value: `${rod.attributes.weightBonus ?? Math.round(rod.attributes.weightBps / 100)}%`, hint: "提高鱼重量区间" },
+                  { label: "Luck", value: `${rod.attributes.luckBonus ?? Math.round(rod.attributes.luckBps / 100)}%`, hint: "提高稀有度概率" },
+                  { label: "Stability", value: `${Math.round((rod.attributes.stabilityBps ?? 0) / 100)}%`, hint: "降低空杆/Debuff影响" },
+                ].map(attr => (
+                  <div key={attr.label} style={{ background: "var(--cream)", borderRadius: "12px", padding: "10px 12px" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--brown)", marginBottom: "2px" }}>{attr.label}</div>
+                    <div style={{ fontSize: "11px", color: "var(--brown-light)", marginBottom: "4px" }}>{attr.hint}</div>
+                    <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--coral)" }}>{attr.value}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -330,21 +509,59 @@ export default function RodDetailPage() {
                 color: "var(--brown-light)",
                 marginBottom: "6px",
               }}>
-                费用信息
+                升级规则
+              </div>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <div style={{ fontSize: "13px", color: "var(--brown)", lineHeight: "1.7" }}>
+                  鱼竿最高可升级到 +5，升级成功后仅会随机提升 Speed / Weight / Luck / Stability 中的一项。
+                </div>
+                <div style={{ fontSize: "13px", color: "var(--brown)", lineHeight: "1.7" }}>
+                  不同等级的成功率依次为 100% / 85% / 65% / 45% / 25%，失败不降级，费用不返还。
+                </div>
+                <div style={{ fontSize: "13px", color: "var(--brown)", lineHeight: "1.7" }}>
+                  数值增幅会随等级变化，与你的合约表一致：+0 到 +5 分别使用不同的随机区间。
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style={{
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "var(--brown-light)",
+                marginBottom: "6px",
+              }}>
+                维修方案
               </div>
               <div style={{
-                background: "var(--cream)",
-                borderRadius: "12px",
-                padding: "12px",
-                fontSize: "12px",
-                color: "var(--brown)",
+                display: "grid",
+                gap: "10px",
               }}>
-                <div style={{ marginBottom: "6px" }}>
-                  • 维护费（当前等级）：{repairFee} ETH
-                </div>
-                <div>
-                  • 升级费（下一等级）：{canUpgrade ? upgradeFee : "-"} ETH
-                </div>
+                {REPAIR_PLANS.map(plan => (
+                  <button
+                    key={plan.restore}
+                    className="card"
+                    onClick={() => handlePartialRepair(plan.restore)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "12px 14px",
+                      background: "var(--cream)",
+                      border: "1px solid var(--cream-dark)",
+                      cursor: isProcessing ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--brown)" }}>{plan.label}</div>
+                        <div style={{ fontSize: "11px", color: "var(--brown-light)" }}>{plan.ratioLabel} 修满费用</div>
+                      </div>
+                      <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--coral)" }}>
+                        {repairQuotes[plan.restore] ? `${repairQuotes[plan.restore]} ETH` : '加载中...'}
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -393,7 +610,7 @@ export default function RodDetailPage() {
               textAlign: "center",
               marginBottom: "16px",
             }}>
-              维护鱼竿
+              维修确认
             </div>
 
             <p style={{
@@ -403,7 +620,7 @@ export default function RodDetailPage() {
               marginBottom: "24px",
               lineHeight: "1.6",
             }}>
-              确认维护 <strong>{rodType.name}</strong> 吗？
+              选择将 <strong>{rodType.name}</strong> 恢复到满耐久。
             </p>
 
             <div
@@ -420,14 +637,14 @@ export default function RodDetailPage() {
                 color: "var(--brown-light)",
                 marginBottom: "8px",
               }}>
-                维护费用
+                Full Repair 费用
               </div>
               <div style={{
                 fontSize: "24px",
                 fontWeight: 800,
                 color: "var(--coral)",
               }}>
-                {repairFee} ETH
+                {repairFee ? repairFee + ' ETH' : '加载中...'}
               </div>
             </div>
 
@@ -449,7 +666,7 @@ export default function RodDetailPage() {
                 onClick={handleRepair}
                 style={{ flex: 1 }}
               >
-                {isProcessing ? "维护中..." : "确认维护"}
+                {isProcessing ? "维修中..." : "确认维修"}
               </button>
             </div>
           </div>
@@ -498,7 +715,7 @@ export default function RodDetailPage() {
               textAlign: "center",
               marginBottom: "16px",
             }}>
-              升级鱼竿
+              升级确认
             </div>
 
             <p style={{
@@ -508,8 +725,7 @@ export default function RodDetailPage() {
               marginBottom: "24px",
               lineHeight: "1.6",
             }}>
-              将 <strong>{rodType.name}</strong> 从 <strong>+{rod.level}</strong> 升级至{" "}
-              <strong>+{rod.level + 1}</strong>
+              将 <strong>{rodType.name}</strong> 从 <strong>+{rod.level}</strong> 升级至 <strong>+{rod.level + 1}</strong>，升级后只会随机提升四项属性中的一项。
             </p>
 
             <div

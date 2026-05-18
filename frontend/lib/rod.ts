@@ -1,63 +1,120 @@
 /**
  * 鱼竿系统数据模型与常量
  */
-
-export type RodType = "Standard" | "Speed" | "Heavy" | "Lucky";
+export type RodType = "Driftwood" | "Tidebreaker" | "Leviathan" | "AbyssWhisper";
 export type Rarity = "Common" | "Rare" | "SuperRare" | "Epic" | "Legendary";
 
 export interface RodData {
   tokenId: number;
   type: RodType;
   rarity: Rarity;
-  level: number;  // +0 ~ +5
-  durability: number;  // 0 ~ 100
+  level: number; // 0..5
+  durability: number; // 0..maxDurability
   maxDurability: number;
   owner: string;
   purchasedAt: number;
   upgradedAt?: number;
   attributes: {
-    speedBonus: number;  // 百分比 (e.g., -15 means 15% faster)
-    weightBonus: number;  // 百分比 (e.g., +20 means 20% heavier)
-    luckBonus: number;  // 百分比 (e.g., +10 means 10% rarity boost)
+    speedBps: number;
+    weightBps: number;
+    luckBps: number;
+    stabilityBps?: number;
+    // Percent-style UI bonuses (derived from bps on-chain)
+    speedBonus?: number;
+    weightBonus?: number;
+    luckBonus?: number;
   };
 }
 
-export const ROD_TYPES: Record<RodType, {
-  name: string;
-  icon: string;
-  description: string;
-  basePrice?: number;
-  rarity: Rarity;
-}> = {
-  Standard: {
-    name: "标准竿",
+export const ROD_TYPES: Record<RodType, { name: string; icon: string; description: string }> = {
+  Driftwood: {
+    name: "Driftwood Rod（流木竿）",
     icon: "🎣",
-    description: "新手入门，无特殊加成，初始有10次免费使用机会",
-    basePrice: 0,
-    rarity: "Common",
+    description: "common 级鱼竿，起始价格 0.01 ETH，初始属性为 Speed +3% / Weight +3%",
   },
-  Speed: {
-    name: "速度竿",
+  Tidebreaker: {
+    name: "Tidebreaker Rod（破潮竿）",
     icon: "⚡",
-    description: "钓鱼时间 -15%，时间系数加成更高",
-    basePrice: 0.05,
-    rarity: "Rare",
+    description: "rare 级鱼竿，起始价格 0.05 ETH，初始属性为 Speed +10% / Weight +2%",
   },
-  Heavy: {
-    name: "重量竿",
+  Leviathan: {
+    name: "Leviathan Rod（海兽竿）",
     icon: "💪",
-    description: "钓上鱼的重量区间整体 +20%",
-    basePrice: 0.05,
-    rarity: "Rare",
+    description: "super rare 级鱼竿，起始价格 0.08 ETH，初始属性为 Luck +5% / Stability +2%",
   },
-  Lucky: {
-    name: "幸运竿",
+  AbyssWhisper: {
+    name: "Abyss Whisper Rod（深渊低语）",
     icon: "✨",
-    description: "稀有度概率整体提升一档，空杆概率 -30%",
-    basePrice: 0.2,
-    rarity: "Legendary",
+    description: "epic 级鱼竿，起始价格 0.15 ETH，初始属性为 Luck +10% / Stability +5%",
   },
 };
+
+// Frontend-specific rod configs: initial prices (ETH) and base repair tables per level
+export const ROD_CONFIG: Record<RodType, { basePriceEth: number; baseRepairCosts: number[]; initialAttributes: { speed?: number; weight?: number; luck?: number; stability?: number } }> = {
+  Driftwood: { basePriceEth: 0.01, baseRepairCosts: [20, 26, 34, 46, 64, 90], initialAttributes: { speed: 3, weight: 3 } },
+  Tidebreaker: { basePriceEth: 0.05, baseRepairCosts: [45, 59, 77, 104, 144, 203], initialAttributes: { speed: 10, weight: 2 } },
+  Leviathan: { basePriceEth: 0.08, baseRepairCosts: [70, 91, 119, 161, 224, 315], initialAttributes: { luck: 5, stability: 2 } },
+  AbyssWhisper: { basePriceEth: 0.15, baseRepairCosts: [120, 156, 204, 276, 384, 540], initialAttributes: { luck: 10, stability: 5 } },
+};
+
+// Upgrade fee table (ETH) for levels +0->+1 ... +4->+5
+export const UPGRADE_FEES_ETH = [0.01, 0.03, 0.06, 0.12, 0.25];
+
+// Attribute appearance probabilities (percent)
+export const ATTRIBUTE_PROBABILITIES: Record<string, number> = {
+  Speed: 25,
+  Weight: 25,
+  Luck: 20,
+  Stability: 30,
+};
+
+// Increment probability tables per upgrade step (values are percent increases)
+export const INCREMENT_TABLES: Record<number, Array<{ value: number; weight: number }>> = {
+  // +0 -> +1
+  0: [ { value: 5, weight: 50 }, { value: 6, weight: 25 }, { value: 7, weight: 15 }, { value: 8, weight: 8 }, { value: 10, weight: 2 } ],
+  // +1 -> +2
+  1: [ { value: 5, weight: 40 }, { value: 6, weight: 30 }, { value: 7, weight: 15 }, { value: 9, weight: 10 }, { value: 12, weight: 5 } ],
+  // +2 -> +3
+  2: [ { value: 5, weight: 35 }, { value: 7, weight: 30 }, { value: 9, weight: 20 }, { value: 12, weight: 10 }, { value: 15, weight: 5 } ],
+  // +3 -> +4
+  3: [ { value: 5, weight: 50 }, { value: 8, weight: 25 }, { value: 10, weight: 15 }, { value: 12, weight: 8 }, { value: 15, weight: 2 } ],
+  // +4 -> +5
+  4: [ { value: 5, weight: 65 }, { value: 7, weight: 20 }, { value: 10, weight: 10 }, { value: 15, weight: 5 } ],
+};
+
+export function getUpgradeFeeLocal(level: number) {
+  return UPGRADE_FEES_ETH[level] ?? null;
+}
+
+export function getFullRepairCostLocal(type: RodType, level: number) {
+  const cfg = ROD_CONFIG[type];
+  return cfg.baseRepairCosts[level] ?? cfg.baseRepairCosts[0];
+}
+
+// Sample an attribute according to probabilities and increment table for the target level
+export function sampleUpgradeResult(currentLevel: number) {
+  // Pick attribute by weighted probability
+  const attrs = Object.keys(ATTRIBUTE_PROBABILITIES);
+  const total = attrs.reduce((s, a) => s + ATTRIBUTE_PROBABILITIES[a], 0);
+  let pick = Math.random() * total;
+  let chosen = attrs[0];
+  for (const a of attrs) {
+    pick -= ATTRIBUTE_PROBABILITIES[a];
+    if (pick <= 0) { chosen = a; break; }
+  }
+
+  // Sample increment based on current level -> next
+  const table = INCREMENT_TABLES[currentLevel] || INCREMENT_TABLES[0];
+  const wtTotal = table.reduce((s, e) => s + e.weight, 0);
+  let p = Math.random() * wtTotal;
+  let chosenValue = table[0].value;
+  for (const e of table) {
+    p -= e.weight;
+    if (p <= 0) { chosenValue = e.value; break; }
+  }
+
+  return { attribute: chosen, incrementPercent: chosenValue };
+}
 
 export const ROD_RARITY_COLORS: Record<Rarity, string> = {
   Common: "#A8A8A8",
@@ -68,56 +125,25 @@ export const ROD_RARITY_COLORS: Record<Rarity, string> = {
 };
 
 export const ROD_MAX_LEVEL = 5;
-export const ROD_USE_BEFORE_REPAIR = 10;  // 10次使用后需要维护
-
-export const REPAIR_FEES: Record<number, number> = {
-  0: 0.01,   // +0 级：0.01 ETH
-  1: 0.02,   // +1 级：0.02 ETH
-  2: 0.03,   // +2 级：0.03 ETH
-  3: 0.05,   // +3 级：0.05 ETH
-  4: 0.08,   // +4 级：0.08 ETH
-  5: 0.15,   // +5 级：0.15 ETH
-};
-
-export const UPGRADE_FEES: Record<number, number> = {
-  0: 0.02,   // +0 → +1：0.02 ETH
-  1: 0.03,   // +1 → +2：0.03 ETH
-  2: 0.05,   // +2 → +3：0.05 ETH
-  3: 0.08,   // +3 → +4：0.08 ETH
-  4: 0.15,   // +4 → +5：0.15 ETH
-};
+export const ROD_USE_BEFORE_REPAIR = 10; // standard uses before full repair is needed
 
 /**
- * 根据等级返回升级成功率（百分比）
+ * Local approximation of on-chain upgrade success for UI display (contract uses bps table)
  */
 export function getUpgradeSuccessRate(currentLevel: number): number {
-  const rates: Record<number, number> = {
-    0: 80,  // +0 → +1: 80%
-    1: 75,  // +1 → +2: 75%
-    2: 70,  // +2 → +3: 70%
-    3: 60,  // +3 → +4: 60%
-    4: 50,  // +4 → +5: 50%
-  };
-  return rates[currentLevel] || 0;
+  const map = { 0: 100, 1: 85, 2: 65, 3: 45, 4: 25 } as Record<number, number>;
+  return map[currentLevel] ?? 0;
 }
 
-/**
- * 根据鱼竿数据计算当前属性
- */
 export function calculateRodAttributes(rod: RodData) {
-  const base = rod.attributes;
-  const levelBonus = rod.level * 2;  // 每升一级，属性提升2%
-
   return {
-    speedBonus: base.speedBonus - (levelBonus * 0.5),
-    weightBonus: base.weightBonus + (levelBonus * 0.3),
-    luckBonus: base.luckBonus + (levelBonus * 0.2),
+    speedBps: rod.attributes.speedBps,
+    weightBps: rod.attributes.weightBps,
+    luckBps: rod.attributes.luckBps,
+    stabilityBps: rod.attributes.stabilityBps ?? 0,
   };
 }
 
-/**
- * 获取鱼竿的状态信息
- */
 export function getRodStatus(rod: RodData): "healthy" | "warning" | "critical" {
   const durabilityPercent = (rod.durability / rod.maxDurability) * 100;
   if (durabilityPercent > 50) return "healthy";
@@ -125,73 +151,54 @@ export function getRodStatus(rod: RodData): "healthy" | "warning" | "critical" {
   return "critical";
 }
 
-/**
- * 生成 Mock 鱼竿数据
- */
 export function generateMockRods(): RodData[] {
   const now = Date.now();
   return [
     {
       tokenId: 1,
-      type: "Standard",
+      type: "Driftwood",
       rarity: "Common",
       level: 0,
-      durability: 80,
       maxDurability: 100,
+      durability: 100,
       owner: "0x1234...5678",
-      purchasedAt: now - 7 * 24 * 60 * 60 * 1000,  // 7 days ago
-      attributes: {
-        speedBonus: 0,
-        weightBonus: 0,
-        luckBonus: 0,
-      },
+      purchasedAt: now - 7 * 86400000,
+      attributes: { speedBps: 300, weightBps: 300, luckBps: 0, stabilityBps: 0, speedBonus: 3, weightBonus: 3, luckBonus: 0 },
     },
     {
       tokenId: 2,
-      type: "Speed",
+      type: "Tidebreaker",
       rarity: "Rare",
       level: 2,
-      durability: 45,
       maxDurability: 100,
+      durability: 100,
       owner: "0x1234...5678",
-      purchasedAt: now - 3 * 24 * 60 * 60 * 1000,  // 3 days ago
-      upgradedAt: now - 1 * 24 * 60 * 60 * 1000,   // 1 day ago
-      attributes: {
-        speedBonus: -15,
-        weightBonus: 0,
-        luckBonus: 0,
-      },
+      purchasedAt: now - 3 * 86400000,
+      upgradedAt: now - 1 * 86400000,
+      attributes: { speedBps: 1000, weightBps: 200, luckBps: 0, stabilityBps: 0, speedBonus: 10, weightBonus: 2, luckBonus: 0 },
     },
     {
       tokenId: 3,
-      type: "Heavy",
+      type: "Leviathan",
       rarity: "Rare",
       level: 1,
-      durability: 92,
       maxDurability: 100,
+      durability: 100,
       owner: "0x1234...5678",
-      purchasedAt: now - 2 * 24 * 60 * 60 * 1000,  // 2 days ago
-      attributes: {
-        speedBonus: 0,
-        weightBonus: 20,
-        luckBonus: 0,
-      },
+      purchasedAt: now - 2 * 86400000,
+      attributes: { speedBps: 0, weightBps: 500, luckBps: 0, stabilityBps: 200, speedBonus: 0, weightBonus: 5, luckBonus: 0 },
     },
     {
       tokenId: 4,
-      type: "Lucky",
+      type: "AbyssWhisper",
       rarity: "Legendary",
       level: 3,
-      durability: 15,
       maxDurability: 100,
+      durability: 100,
       owner: "0x1234...5678",
-      purchasedAt: now - 10 * 24 * 60 * 60 * 1000,  // 10 days ago
-      upgradedAt: now - 2 * 24 * 60 * 60 * 1000,   // 2 days ago
-      attributes: {
-        speedBonus: 0,
-        weightBonus: 0,
-        luckBonus: 10,
-      },
+      purchasedAt: now - 10 * 86400000,
+      upgradedAt: now - 2 * 86400000,
+      attributes: { speedBps: 0, weightBps: 0, luckBps: 1000, stabilityBps: 500, speedBonus: 0, weightBonus: 0, luckBonus: 10 },
     },
   ];
 }

@@ -1,0 +1,268 @@
+import { ethers } from "ethers";
+import { ROD_CONFIG, UPGRADE_FEES_ETH, getUpgradeFeeLocal, sampleUpgradeResult, type RodData } from "./rod";
+
+export const FISHING_ROD_ADDRESS = process.env.NEXT_PUBLIC_FISHING_ROD_ADDRESS || "0x0000000000000000000000000000000000000000";
+
+export const FISHING_ROD_ABI = [
+  "function mintRod(uint8 rodType) payable returns (uint256)",
+  "function repairFull(uint256 tokenId) payable",
+  "function repairPartial(uint256 tokenId, uint16 restoreDurability) payable",
+  "function upgrade(uint256 tokenId) payable returns (uint256)",
+  "function getRodBonus(uint256 tokenId) view returns (uint256 speedBonus, uint256 weightBonus, uint256 luckBonus)",
+  "function getRod(uint256 tokenId) view returns (uint8 rodType, uint8 rarity, uint8 level, uint16 durability, uint16 maxDurability, uint16 speedBps, uint16 weightBps, uint16 luckBps, uint16 stabilityBps)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function mintPriceWei(uint8 rodType) view returns (uint256)",
+  "function upgradeFeeWei(uint8 currentLevel) view returns (uint256)",
+  "function fullRepairCost(uint256 tokenId) view returns (uint256)",
+  "function partialRepairCost(uint256 tokenId, uint16 restoreDurability) view returns (uint256)",
+] as const;
+
+export function getFishingRodContract(signerOrProvider: ethers.Signer | ethers.Provider) {
+  return new ethers.Contract(FISHING_ROD_ADDRESS, FISHING_ROD_ABI, signerOrProvider);
+}
+
+async function resolveToSigner(signerOrProvider: any): Promise<ethers.Signer> {
+  // If it's already a signer (has getAddress/sendTransaction), return it.
+  if (!signerOrProvider) {
+    // Fallback: create signer from window.ethereum
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      const bp = new ethers.BrowserProvider((window as any).ethereum);
+      return bp.getSigner();
+    }
+    throw new Error('No signer or provider available');
+  }
+
+  // ethers v6 Signer has getAddress function
+  if (typeof signerOrProvider.getAddress === 'function') {
+    return signerOrProvider as ethers.Signer;
+  }
+
+  // If it's a provider with getSigner(), call it
+  if (typeof signerOrProvider.getSigner === 'function') {
+    const s = await signerOrProvider.getSigner();
+    return s as ethers.Signer;
+  }
+
+  // If it's a BrowserProvider-like object, try to construct BrowserProvider
+  if (typeof window !== 'undefined' && (window as any).ethereum) {
+    const bp = new ethers.BrowserProvider((window as any).ethereum);
+    return bp.getSigner();
+  }
+
+  throw new Error('Unable to resolve signer from provided argument');
+}
+
+export async function getMintPrice(rodType: number, provider: ethers.Provider) {
+  // If provider is a read-only provider, try on-chain call; otherwise fallback to frontend config
+  try {
+    const c = getFishingRodContract(provider);
+    return await c.mintPriceWei(rodType);
+  } catch (e) {
+    const keys = Object.keys(ROD_CONFIG) as Array<keyof typeof ROD_CONFIG>;
+    const key = keys[rodType] ?? keys[0];
+    const priceEth = ROD_CONFIG[key].basePriceEth;
+    return ethers.parseEther(String(priceEth));
+  }
+}
+
+export async function getRod(tokenId: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  return await c.getRod(tokenId);
+}
+
+// Return a frontend-friendly RodData mapped from on-chain tuple
+export async function getRodOnChain(tokenId: number, provider: ethers.Provider): Promise<RodData | null> {
+  try {
+    const c = getFishingRodContract(provider);
+    const r = await c.getRod(tokenId);
+    // r: [rodType, rarity, level, durability, maxDurability, speedBps, weightBps, luckBps, stabilityBps]
+    const typeKey = Object.keys(ROD_CONFIG)[Number(r[0]) || 0] as keyof typeof ROD_CONFIG;
+    const speedBps = Number(r[5] || 0);
+    const weightBps = Number(r[6] || 0);
+    const luckBps = Number(r[7] || 0);
+    const stabilityBps = Number(r[8] || 0);
+    const mapped: RodData = {
+      tokenId: Number(tokenId),
+      type: typeKey as any,
+      rarity: "Common",
+      level: Number(r[2] || 0),
+      durability: Number(r[3] || 0),
+      maxDurability: Number(r[4] || 0),
+      owner: "",
+      purchasedAt: Date.now(),
+      attributes: {
+        speedBps,
+        weightBps,
+        luckBps,
+        stabilityBps,
+        speedBonus: Math.round(speedBps / 100),
+        weightBonus: Math.round(weightBps / 100),
+        luckBonus: Math.round(luckBps / 100),
+      } as any,
+    } as RodData;
+    return mapped;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function getOwnerOf(tokenId: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  return await c.ownerOf(tokenId);
+}
+
+// Fetch rods owned by `owner` by scanning token IDs from 1..maxToken (view-only).
+export async function fetchRodsForOwner(owner: string, provider: ethers.Provider, maxToken = 200) {
+  const c = getFishingRodContract(provider);
+  const found: RodData[] = [];
+  const calls: Promise<void>[] = [] as any;
+  for (let id = 1; id <= maxToken; id++) {
+    calls.push((async (tokenId: number) => {
+      try {
+        const o = await c.ownerOf(tokenId);
+        if (o && o.toLowerCase() === owner.toLowerCase()) {
+          const mapped = await getRodOnChain(tokenId, provider);
+          if (mapped) {
+            mapped.owner = o;
+            found.push(mapped);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })(id));
+  }
+  await Promise.all(calls);
+  return found;
+}
+
+export async function getUpgradeFee(level: number, provider: ethers.Provider) {
+  try {
+    const c = getFishingRodContract(provider);
+    return await c.upgradeFeeWei(level);
+  } catch (e) {
+    const fee = getUpgradeFeeLocal(level);
+    return fee ? ethers.parseEther(String(fee)) : ethers.parseEther('0');
+  }
+}
+
+export async function getFullRepairCost(tokenId: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  return await c.fullRepairCost(tokenId);
+}
+
+export async function getPartialRepairCost(tokenId: number, restore: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  return await c.partialRepairCost(tokenId, restore);
+}
+
+export async function mintRodOnChain(rodType: number, signer: ethers.Signer) {
+  const s = await resolveToSigner(signer);
+  const c = getFishingRodContract(s);
+  const price = await c.mintPriceWei(rodType);
+  const tx = await c.mintRod(rodType, { value: price });
+  return tx;
+}
+
+export async function repairFullOnChain(tokenId: number, signer: ethers.Signer, value?: ethers.BigNumberish) {
+  const s = await resolveToSigner(signer);
+  const c = getFishingRodContract(s);
+  if (value) return await c.repairFull(tokenId, { value });
+  return await c.repairFull(tokenId);
+}
+
+export async function repairPartialOnChain(tokenId: number, restore: number, signer: ethers.Signer, value?: ethers.BigNumberish) {
+  const s = await resolveToSigner(signer);
+  const c = getFishingRodContract(s);
+  if (value) return await c.repairPartial(tokenId, restore, { value });
+  return await c.repairPartial(tokenId, restore);
+}
+
+export async function upgradeOnChain(tokenId: number, signer: ethers.Signer, value?: ethers.BigNumberish) {
+  const s = await resolveToSigner(signer);
+  const c = getFishingRodContract(s);
+  if (value) return await c.upgrade(tokenId, { value });
+  return await c.upgrade(tokenId);
+}
+
+// --- Simulation helpers (no tx sent) ---
+export async function simulateMint(rodType: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  const price = await c.mintPriceWei(rodType);
+  let gasEstimate: any = null;
+  try {
+    gasEstimate = await c.estimateGas.mintRod(rodType, { value: price });
+  } catch (e) {
+    // ignore
+  }
+  let callResult: any = null;
+  try {
+    callResult = await c.callStatic.mintRod(rodType, { value: price });
+  } catch (e) {
+    // callStatic may revert; ignore
+  }
+  return { price, gasEstimate, callResult };
+}
+
+export async function simulateRepairFull(tokenId: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  let price: any = ethers.BigNumber.from(0);
+  try {
+    price = await c.fullRepairCost(tokenId);
+  } catch (e) {
+    // fallback: cannot resolve token -> use caller provided via frontend mapping (best-effort)
+    // Return price as 0 here; callers may use frontend's getFullRepairCostLocal with rod type and level
+    price = ethers.BigNumber.from(0);
+  }
+  let gasEstimate: any = null;
+  try {
+    gasEstimate = await c.estimateGas.repairFull(tokenId, { value: price });
+  } catch (e) {}
+  let callResult: any = null;
+  try {
+    callResult = await c.callStatic.repairFull(tokenId, { value: price });
+  } catch (e) {}
+  return { price, gasEstimate, callResult };
+}
+
+export async function simulateUpgrade(tokenId: number, level: number | null, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  let price: any = ethers.BigNumber.from(0);
+  try {
+    if (level !== null && level !== undefined) price = await c.upgradeFeeWei(level);
+  } catch (e) {
+    const fee = getUpgradeFeeLocal(level ?? 0);
+    price = ethers.parseEther(String(fee ?? 0));
+  }
+
+  let gasEstimate: any = null;
+  try {
+    gasEstimate = await c.estimateGas.upgrade(tokenId, { value: price });
+  } catch (e) {}
+
+  // Local simulated attribute outcome (frontend-only) so UI can preview
+  const simulated = sampleUpgradeResult(level ?? 0);
+
+  let callResult: any = null;
+  try {
+    callResult = await c.callStatic.upgrade(tokenId, { value: price });
+  } catch (e) {}
+  return { price, gasEstimate, callResult, simulated };
+}
+
+// Watch for UpgradeResolved events and call callback(tokenId:number, success:boolean, newLevel:number, attr:number, delta:number)
+export function watchUpgradeResolved(signerOrProvider: ethers.Signer | ethers.Provider, callback: (tokenId: number, success: boolean, newLevel: number, attr: number, delta: number) => void) {
+  const c = getFishingRodContract(signerOrProvider as any);
+  const handler = (tokenId: any, success: any, newLevel: any, attr: any, delta: any) => {
+    try {
+      const tid = Number(tokenId?.toString?.() ?? tokenId);
+      callback(tid, Boolean(success), Number(newLevel?.toString?.() ?? newLevel), Number(attr?.toString?.() ?? attr), Number(delta?.toString?.() ?? delta));
+    } catch (e) {
+      // ignore
+    }
+  };
+  c.on('UpgradeResolved', handler);
+  return () => {
+    try { c.off('UpgradeResolved', handler); } catch (e) {}
+  };
+}

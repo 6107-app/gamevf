@@ -1,15 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
 import { RodData, generateMockRods, ROD_TYPES } from "@/lib/rod";
+import { ethers } from "ethers";
+import { getMintPrice, mintRodOnChain, fetchRodsForOwner, simulateMint } from "@/lib/fishingRod";
 
 export default function RodsHallPage() {
   const router = useRouter();
   const [rods, setRods] = useState<RodData[]>(generateMockRods());
   const [filterType, setFilterType] = useState<"All" | keyof typeof ROD_TYPES>("All");
+  const [mintPrices, setMintPrices] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchMintPrices = async () => {
+      try {
+        const provider = typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        const prices = await Promise.all(Object.keys(ROD_TYPES).map((_, idx) => getMintPrice(idx as number, provider)));
+        setMintPrices(prices);
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchMintPrices();
+  }, []);
+
+  const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
+
+  // Fetch rods for a virtual address (read-only). Uses NEXT_PUBLIC_FAKE_ADDRESS or a default.
+  useEffect(() => {
+    const fetchOwned = async () => {
+      try {
+        const provider = typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        const fake = process.env.NEXT_PUBLIC_FAKE_ADDRESS || "0x0000000000000000000000000000000000000001";
+        const owned = await fetchRodsForOwner(fake, provider, 200);
+        if (owned && owned.length > 0) setRods(owned);
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchOwned();
+  }, []);
 
   const filtered = rods.filter(rod => {
     if (filterType === "All") return true;
@@ -32,14 +69,18 @@ export default function RodsHallPage() {
       }}>
         {/* Page Header */}
         <div style={{ marginBottom: "32px" }}>
-          <div style={{
-            fontFamily: "var(--font-serif)",
-            fontSize: "32px",
-            fontWeight: 700,
-            color: "var(--brown)",
-            marginBottom: "8px",
-          }}>
-            🎣 我的鱼竿库
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{
+              fontFamily: "var(--font-serif)",
+              fontSize: "32px",
+              fontWeight: 700,
+              color: "var(--brown)",
+            }}>
+              🎣 我的鱼竿库
+            </div>
+            <div>
+              <button className="btn-secondary" onClick={() => window.location.href = '/'}>返回大厅</button>
+            </div>
           </div>
           <p style={{
             fontSize: "14px",
@@ -57,7 +98,7 @@ export default function RodsHallPage() {
           marginBottom: "24px",
           flexWrap: "wrap",
         }}>
-          {["All", "Standard", "Speed", "Heavy", "Lucky"].map(type => (
+          {(["All", ...Object.keys(ROD_TYPES)] as string[]).map(type => (
             <button
               key={type}
               onClick={() => setFilterType(type as any)}
@@ -148,7 +189,7 @@ export default function RodsHallPage() {
             gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
             gap: "16px",
           }}>
-            {["Speed", "Heavy", "Lucky"].map(type => {
+            {Object.keys(ROD_TYPES).map((type, idx) => {
               const rodInfo = ROD_TYPES[type as keyof typeof ROD_TYPES];
               const hasRod = rods.some(r => r.type === type);
               return (
@@ -177,9 +218,7 @@ export default function RodsHallPage() {
                       }}>
                         {rodInfo.name}
                       </div>
-                      <span className={`rod-rarity-badge rod-rarity-${rodInfo.rarity.toLowerCase()}`}>
-                        {rodInfo.rarity}
-                      </span>
+                      {/* rarity shown per-item on detail page */}
                     </div>
                   </div>
                   <p style={{
@@ -196,9 +235,36 @@ export default function RodsHallPage() {
                         marginTop: "8px",
                         width: "100%",
                       }}
-                      onClick={() => alert(`购买 ${rodInfo.name}！`)}
+                          onClick={async () => {
+                        try {
+                          const provider = typeof window !== 'undefined' && (window as any).ethereum
+                            ? new ethers.BrowserProvider((window as any).ethereum)
+                            : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+                          if (SIMULATE) {
+                            const sim = await simulateMint(idx, provider);
+                            alert(`模拟铸造：价格 ${ethers.formatEther(sim.price)} ETH，估算 gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}`);
+                            return;
+                          }
+                          if (!(window as any).ethereum) return alert('请安装钱包');
+                          const web3 = new ethers.BrowserProvider((window as any).ethereum);
+                          await web3.send('eth_requestAccounts', []);
+                          const signer = await web3.getSigner();
+                          const tx = await mintRodOnChain(idx, signer);
+                          alert('交易已发出，等待上链');
+                          await tx.wait();
+                          alert('铸造成功');
+                        } catch (e: any) {
+                          console.error(e);
+                          const code = e?.code || e?.error?.code;
+                          if (code === 4001) {
+                            alert('用户已拒绝交易签名');
+                          } else {
+                            alert('交易失败');
+                          }
+                        }
+                      }}
                     >
-                      购买 - {rodInfo.basePrice} ETH
+                      购买 - {mintPrices[idx] ? `${ethers.formatEther(mintPrices[idx])} ETH` : '加载中...'}
                     </button>
                   )}
                   {hasRod && (
