@@ -7,6 +7,19 @@ import "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.s
 
 // ─── NFT Rod Interface ─────────────────────────────────
 interface IFishingRod {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function getRod(uint256 tokenId) external view returns (
+        uint8 rodType,
+        uint8 rarity,
+        uint8 level,
+        uint16 durability,
+        uint16 maxDurability,
+        uint16 speedBps,
+        uint16 weightBps,
+        uint16 luckBps,
+        uint16 stabilityBps
+    );
+    function consumeDurability(uint256 tokenId, uint16 amount) external;
     function getRodBonus(uint256 tokenId) external view returns (
         uint256 speedBonus,   // time reduction in bps (e.g. 1500 = -15%)
         uint256 weightBonus,  // weight increase in bps (e.g. 2000 = +20%)
@@ -37,6 +50,11 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         uint256 recastCount;
         uint256 totalBet;
         uint256 skillModifier;
+        uint256 rodTokenId;
+        uint16 rodSpeedBps;
+        uint16 rodWeightBps;
+        uint16 rodLuckBps;
+        uint16 rodStabilityBps;
     }
 
     struct Room {
@@ -109,6 +127,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     error NoFishCaught();
     error GameNotTimedOut();
     error PlayerAlreadyLockedIn();
+    error NotRodOwner();
+    error InvalidRod();
 
     // ─── Events ─────────────────────────────────────────
     event RoomCreated(uint256 indexed roomId, address indexed host, RoomTier tier, bool isPublic, uint256 entryFee, uint256 timestamp);
@@ -120,6 +140,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber);
     event DiceRolled(uint256 indexed roomId, address player, int256 diceModifier);
     event GameSettled(uint256 indexed roomId, address[3] winners, uint256[3] prizes, uint256[4] finalScores);
+    event RodUsed(uint256 indexed roomId, address indexed player, uint256 indexed tokenId, uint16 speedBps, uint16 weightBps, uint16 luckBps, uint16 stabilityBps);
 
     // ─── Constructor ────────────────────────────────────
     constructor(
@@ -175,7 +196,12 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             currentFish: FishResult(Rarity.Common, 0, 0, 0),
             recastCount: 0,
             totalBet: msg.value,
-            skillModifier: 10000
+            skillModifier: 10000,
+            rodTokenId: 0,
+            rodSpeedBps: 0,
+            rodWeightBps: 0,
+            rodLuckBps: 0,
+            rodStabilityBps: 0
         });
 
         emit RoomCreated(roomId, msg.sender, tier, isPublic, entryFees[tier], block.timestamp);
@@ -202,7 +228,12 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             currentFish: FishResult(Rarity.Common, 0, 0, 0),
             recastCount: 0,
             totalBet: msg.value,
-            skillModifier: 10000
+            skillModifier: 10000,
+            rodTokenId: 0,
+            rodSpeedBps: 0,
+            rodWeightBps: 0,
+            rodLuckBps: 0,
+            rodStabilityBps: 0
         });
 
         emit PlayerJoined(roomId, msg.sender, idx);
@@ -221,13 +252,15 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
 
     // ─── Fishing Actions ────────────────────────────────
 
-    function cast(uint256 roomId) external {
+    function cast(uint256 roomId, uint256 rodTokenId) external {
         Room storage room = rooms[roomId];
         if (room.status != RoomStatus.Active) revert RoomNotActive();
         if (!room.isPlayer[msg.sender]) revert NotInRoom();
         uint256 idx = room.playerIndex[msg.sender];
         Player storage player = room.playerData[idx];
         if (player.status != PlayerStatus.Fishing) revert NotFishing();
+
+        _syncRodSnapshot(roomId, player, msg.sender, rodTokenId);
 
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
             VRFV2PlusClient.RandomWordsRequest({
@@ -241,6 +274,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         );
 
         vrfRequests[requestId] = VRFRequest(roomId, idx, false);
+        _consumeEquippedRod(player.rodTokenId, 8);
         emit CastRequested(roomId, msg.sender, requestId);
     }
 
@@ -263,7 +297,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         }
     }
 
-    function recast(uint256 roomId) external payable nonReentrant {
+    function recast(uint256 roomId, uint256 rodTokenId) external payable nonReentrant {
         Room storage room = rooms[roomId];
         if (!room.isPlayer[msg.sender]) revert NotInRoom();
         uint256 idx = room.playerIndex[msg.sender];
@@ -271,6 +305,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         if (player.status != PlayerStatus.Fishing) revert NotFishing();
         if (player.recastCount >= MAX_RECAST) revert MaxRecastReached();
         if (msg.value != room.recastFee) revert IncorrectFee();
+
+        _syncRodSnapshot(roomId, player, msg.sender, rodTokenId);
 
         player.recastCount++;
         player.totalBet += msg.value;
@@ -288,6 +324,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         );
 
         vrfRequests[requestId] = VRFRequest(roomId, idx, true);
+        _consumeEquippedRod(player.rodTokenId, 12);
         emit RecastStarted(roomId, msg.sender, player.recastCount);
     }
 
@@ -299,11 +336,21 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         Player storage player = room.playerData[req.playerIndex];
 
         uint256 previousScore = player.currentFish.score;
+        uint256 effectiveSkillModifier = _effectiveSkillModifier(player.skillModifier, player.rodLuckBps);
 
         uint8 rarityRoll = uint8(randomWords[0] % 100);
-        Rarity rarity = _rollRarity(rarityRoll, player.skillModifier);
+        Rarity rarity = _rollRarity(rarityRoll, effectiveSkillModifier);
         uint256 baseWeight = _rollWeight(randomWords[1], rarity);
+        if (player.rodWeightBps > 0) {
+            baseWeight = (baseWeight * (10000 + uint256(player.rodWeightBps))) / 10000;
+        }
         uint256 timeVariation = 60 + (randomWords[2] % 61);
+        if (player.rodSpeedBps > 0) {
+            uint256 speedReduction = uint256(player.rodSpeedBps);
+            if (speedReduction > 9000) speedReduction = 9000;
+            timeVariation = (timeVariation * (10000 - speedReduction)) / 10000;
+            if (timeVariation < 30) timeVariation = 30;
+        }
 
         player.currentFish = FishResult({
             rarity: rarity,
@@ -327,7 +374,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
 
         // Recast floor: new score must be >= 70% of previous score
         if (req.isRecast && previousScore > 0) {
-            uint256 floor = (previousScore * RECAST_FLOOR_BPS) / 10000;
+            uint256 floorBps = RECAST_FLOOR_BPS + uint256(player.rodStabilityBps) / 2;
+            if (floorBps > 9500) floorBps = 9500;
+            uint256 floor = (previousScore * floorBps) / 10000;
             if (player.currentFish.score < floor) {
                 player.currentFish.score = floor;
             }
@@ -473,6 +522,55 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             if (time <= TIME_THRESHOLDS[i]) return TIME_COEFFICIENTS[i];
         }
         return TIME_COEFFICIENTS[3];
+    }
+
+    function _syncRodSnapshot(uint256 roomId, Player storage player, address playerAddr, uint256 rodTokenId) internal {
+        player.rodTokenId = rodTokenId;
+        player.rodSpeedBps = 0;
+        player.rodWeightBps = 0;
+        player.rodLuckBps = 0;
+        player.rodStabilityBps = 0;
+
+        if (rodTokenId == 0) {
+            return;
+        }
+        if (address(rodContract) == address(0)) revert InvalidRod();
+
+        address owner = rodContract.ownerOf(rodTokenId);
+        if (owner != playerAddr) revert NotRodOwner();
+
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint16 speedBps,
+            uint16 weightBps,
+            uint16 luckBps,
+            uint16 stabilityBps
+        ) = rodContract.getRod(rodTokenId);
+
+        player.rodSpeedBps = speedBps;
+        player.rodWeightBps = weightBps;
+        player.rodLuckBps = luckBps;
+        player.rodStabilityBps = stabilityBps;
+
+        emit RodUsed(roomId, playerAddr, rodTokenId, speedBps, weightBps, luckBps, stabilityBps);
+    }
+
+    function _consumeEquippedRod(uint256 rodTokenId, uint16 amount) internal {
+        if (rodTokenId == 0) return;
+        if (address(rodContract) == address(0)) revert InvalidRod();
+        rodContract.consumeDurability(rodTokenId, amount);
+    }
+
+    function _effectiveSkillModifier(uint256 baseSkillModifier, uint16 luckBps) internal pure returns (uint256) {
+        uint256 luckReduction = uint256(luckBps);
+        if (luckReduction > 9000) luckReduction = 9000;
+        uint256 effective = (baseSkillModifier * (10000 - luckReduction)) / 10000;
+        if (effective < 1000) return 1000;
+        return effective;
     }
 
     // ─── View Functions ─────────────────────────────────

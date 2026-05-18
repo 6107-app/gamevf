@@ -4,6 +4,40 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/FishingGame.sol";
 
+contract MockFishingRod {
+    mapping(uint256 => address) private _owners;
+
+    function setOwner(uint256 tokenId, address owner) external {
+        _owners[tokenId] = owner;
+    }
+
+    function ownerOf(uint256 tokenId) external view returns (address) {
+        address owner = _owners[tokenId];
+        require(owner != address(0), "invalid token");
+        return owner;
+    }
+
+    function getRod(uint256) external pure returns (
+        uint8 rodType,
+        uint8 rarity,
+        uint8 level,
+        uint16 durability,
+        uint16 maxDurability,
+        uint16 speedBps,
+        uint16 weightBps,
+        uint16 luckBps,
+        uint16 stabilityBps
+    ) {
+        return (0, 0, 0, 100, 100, 3000, 2500, 3000, 2000);
+    }
+
+    function consumeDurability(uint256, uint16) external {}
+
+    function getRodBonus(uint256) external pure returns (uint256 speedBonus, uint256 weightBonus, uint256 luckBonus) {
+        return (3000, 2500, 3000);
+    }
+}
+
 // ─── Mock VRF Coordinator ───────────────────────────────
 contract MockVRFCoordinator {
     uint256 private _reqId;
@@ -40,6 +74,7 @@ contract MockVRFCoordinator {
 contract FishingGameTest is Test {
     FishingGame public game;
     MockVRFCoordinator public mockVRF;
+    MockFishingRod public mockRod;
 
     address public host    = makeAddr("host");
     address public player2 = makeAddr("player2");
@@ -52,11 +87,13 @@ contract FishingGameTest is Test {
 
     function setUp() public {
         mockVRF = new MockVRFCoordinator();
+        mockRod = new MockFishingRod();
         game = new FishingGame(
             address(mockVRF),
             bytes32(uint256(1)),
             1
         );
+        game.setRodContract(address(mockRod));
 
         vm.deal(host, 10 ether);
         vm.deal(player2, 10 ether);
@@ -230,7 +267,7 @@ contract FishingGameTest is Test {
     function test_cast_success() public {
         uint256 roomId = _setupActiveRoom();
         vm.prank(host);
-        game.cast(roomId);
+        game.cast(roomId, 0);
     }
 
     function test_cast_notActive_reverts() public {
@@ -239,14 +276,14 @@ contract FishingGameTest is Test {
 
         vm.prank(host);
         vm.expectRevert(FishingGame.RoomNotActive.selector);
-        game.cast(0);
+        game.cast(0, 0);
     }
 
     function test_castAndFulfill() public {
         uint256 roomId = _setupActiveRoom();
 
         vm.prank(host);
-        game.cast(roomId);
+        game.cast(roomId, 0);
 
         mockVRF.fulfillRandomWords(1, _makeRandomWords3());
 
@@ -261,7 +298,7 @@ contract FishingGameTest is Test {
         uint256 roomId = _setupActiveRoom();
 
         vm.prank(host);
-        game.cast(roomId);
+        game.cast(roomId, 0);
         mockVRF.fulfillRandomWords(1, _makeRandomWords3());
 
         vm.prank(host);
@@ -285,11 +322,11 @@ contract FishingGameTest is Test {
         uint256 roomId = _setupActiveRoom();
 
         vm.prank(host);
-        game.cast(roomId);
+        game.cast(roomId, 0);
         mockVRF.fulfillRandomWords(1, _makeRandomWords3());
 
         vm.prank(host);
-        game.recast{value: BRONZE_FEE}(roomId);
+        game.recast{value: BRONZE_FEE}(roomId, 0);
         mockVRF.fulfillRandomWords(2, _makeRandomWords5());
 
         (,,,,, uint256 score, uint256 recastCount,) = game.getPlayerInfo(roomId, 0);
@@ -301,18 +338,42 @@ contract FishingGameTest is Test {
         uint256 roomId = _setupActiveRoom();
 
         vm.prank(host);
-        game.cast(roomId);
+        game.cast(roomId, 0);
         mockVRF.fulfillRandomWords(1, _makeRandomWords3());
 
         for (uint256 i = 0; i < 3; i++) {
             vm.prank(host);
-            game.recast{value: BRONZE_FEE}(roomId);
+            game.recast{value: BRONZE_FEE}(roomId, 0);
             mockVRF.fulfillRandomWords(i + 2, _makeRandomWords5());
         }
 
         vm.prank(host);
         vm.expectRevert(FishingGame.MaxRecastReached.selector);
-        game.recast{value: BRONZE_FEE}(roomId);
+        game.recast{value: BRONZE_FEE}(roomId, 0);
+    }
+
+    function test_castWithRodImprovesScore() public {
+        uint256 roomId = _setupActiveRoom();
+        mockRod.setOwner(1, host);
+
+        vm.prank(host);
+        game.cast(roomId, 0);
+        mockVRF.fulfillRandomWords(1, _makeRandomWords3());
+        (,, uint8 rarityWithoutRod, uint256 weightWithoutRod,, uint256 scoreWithoutRod,,) = game.getPlayerInfo(roomId, 0);
+
+        uint256 roomId2 = _setupActiveRoom();
+        mockRod.setOwner(1, host);
+
+        vm.prank(host);
+        game.cast(roomId2, 1);
+        mockVRF.fulfillRandomWords(2, _makeRandomWords3());
+        (,, uint8 rarityWithRod, uint256 weightWithRod,, uint256 scoreWithRod,,) = game.getPlayerInfo(roomId2, 0);
+
+        assertTrue(
+            rarityWithRod != rarityWithoutRod ||
+            weightWithRod != weightWithoutRod ||
+            scoreWithRod != scoreWithoutRod
+        );
     }
 
     // ─── Full game settlement ───────────────────────────
@@ -324,7 +385,7 @@ contract FishingGameTest is Test {
         address[4] memory players = [host, player2, player3, player4];
         for (uint256 i = 0; i < 4; i++) {
             vm.prank(players[i]);
-            game.cast(roomId);
+            game.cast(roomId, 0);
 
             uint256[] memory rw = new uint256[](3);
             rw[0] = 10 + i * 20;
