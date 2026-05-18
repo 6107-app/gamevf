@@ -7,14 +7,14 @@ import RodCard from "@/components/rods/RodCard";
 import RodDurabilityBar from "@/components/rods/RodDurabilityBar";
 import { generateMockRods, ROD_TYPES, ROD_MAX_LEVEL, ROD_USE_BEFORE_REPAIR, getUpgradeSuccessRate, getRodStatus, type RodData } from "@/lib/rod";
 import { ethers } from "ethers";
-import { getFullRepairCost, getPartialRepairCost, getUpgradeFee, repairFullOnChain, repairPartialOnChain, upgradeOnChain, simulateRepairFull, simulateUpgrade, getRodOnChain, watchUpgradeResolved } from "@/lib/fishingRod";
+import { getFullRepairCost, getPartialRepairCost, getUpgradeFee, repairFullOnChain, repairPartialOnChain, upgradeOnChain, simulateRepairFull, simulateUpgrade, getRodOnChain, watchUpgradeResolved, getPendingUpgradeRequestId, getOwnerOf } from "@/lib/fishingRod";
 import { getFullRepairCostLocal, getUpgradeFeeLocal, ROD_CONFIG } from '@/lib/rod';
 
 const REPAIR_PLANS = [
-  { restore: 10, label: "+10", ratioLabel: "15%" },
-  { restore: 25, label: "+25", ratioLabel: "35%" },
-  { restore: 50, label: "+50", ratioLabel: "60%" },
-  { restore: 100, label: "Full Repair", ratioLabel: "100%" },
+  { restore: 10, label: "+10", ratioLabel: "15%", ratioPercent: 15 },
+  { restore: 25, label: "+25", ratioLabel: "35%", ratioPercent: 35 },
+  { restore: 50, label: "+50", ratioLabel: "60%", ratioPercent: 60 },
+  { restore: 100, label: "Full Repair", ratioLabel: "100%", ratioPercent: 100 },
 ] as const;
 
 export default function RodDetailPage() {
@@ -58,9 +58,12 @@ export default function RodDetailPage() {
     let unsub: (() => void) | null = null;
     const fetch = async () => {
       try {
-        const provider = typeof window !== 'undefined' && (window as any).ethereum
-          ? new ethers.BrowserProvider((window as any).ethereum)
-          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        // Prefer a read-only RPC provider (faster and doesn't depend on MetaMask)
+        const provider = process.env.NEXT_PUBLIC_RPC_URL
+          ? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
+          : (typeof window !== 'undefined' && (window as any).ethereum
+            ? new ethers.BrowserProvider((window as any).ethereum)
+            : new ethers.JsonRpcProvider('http://127.0.0.1:8545'));
         const onChain = await getRodOnChain(tokenId, provider);
         if (onChain) setRod(onChain);
         // subscribe to upgrade events to refresh on result
@@ -87,9 +90,12 @@ export default function RodDetailPage() {
   useEffect(() => {
     const fetchFees = async () => {
       try {
-        const provider = typeof window !== 'undefined' && (window as any).ethereum
-          ? new ethers.BrowserProvider((window as any).ethereum)
-          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+        // Prefer read-only RPC provider to avoid MetaMask latency when just showing fees
+        const provider = process.env.NEXT_PUBLIC_RPC_URL
+          ? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
+          : (typeof window !== 'undefined' && (window as any).ethereum
+            ? new ethers.BrowserProvider((window as any).ethereum)
+            : new ethers.JsonRpcProvider('http://127.0.0.1:8545'));
         let full: any = null;
         let up: any = null;
         try {
@@ -114,12 +120,12 @@ export default function RodDetailPage() {
             } else {
               partials[plan.restore] = plan.restore === 100
                 ? String(getFullRepairCostLocal(rod.type as any, rod.level))
-                : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.restore) / 100));
+                : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.ratioPercent) / 100));
             }
           } catch (e) {
             partials[plan.restore] = plan.restore === 100
               ? String(getFullRepairCostLocal(rod.type as any, rod.level))
-              : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.restore) / 100));
+              : String(Math.round((getFullRepairCostLocal(rod.type as any, rod.level) * plan.ratioPercent) / 100));
           }
         }
 
@@ -151,9 +157,11 @@ export default function RodDetailPage() {
     const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
     setIsProcessing(true);
     try {
-      const provider = typeof window !== 'undefined' && (window as any).ethereum
-        ? new ethers.BrowserProvider((window as any).ethereum)
-        : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+      const provider = process.env.NEXT_PUBLIC_RPC_URL
+        ? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
+        : (typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider('http://127.0.0.1:8545'));
       if (SIMULATE) {
         const sim = await simulateRepairFull(rod.tokenId, provider);
         alert(`模拟维护：费用 ${sim.price && sim.price.toString && sim.price.toString() !== '0' ? ethers.formatEther(sim.price) + ' ETH' : getFullRepairCostLocal(rod.type as any, rod.level) + ' tokens'}，估算 gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}`);
@@ -165,7 +173,29 @@ export default function RodDetailPage() {
       const web3 = new ethers.BrowserProvider((window as any).ethereum);
       await web3.send('eth_requestAccounts', []);
       const signer = await web3.getSigner();
-      const tx = await repairFullOnChain(rod.tokenId, signer);
+
+      // guard: check signer owns this token to avoid immediate revert NotTokenOwner
+      try {
+        const signerAddr = await signer.getAddress();
+        const ownerOnChain = await getOwnerOf(rod.tokenId, web3);
+        if (ownerOnChain && ownerOnChain.toLowerCase() !== signerAddr.toLowerCase()) {
+          alert('你不是这把鱼竿的持有者，无法执行维修');
+          setIsProcessing(false);
+          setShowRepairModal(false);
+          return;
+        }
+      } catch (e) {
+        // best-effort; continue
+      }
+
+      // fetch on-chain fee and pass as value so MetaMask shows correct amount
+      let price: any = null;
+      try {
+        price = await getFullRepairCost(rod.tokenId, web3);
+      } catch (e) {
+        price = null;
+      }
+      const tx = price ? await repairFullOnChain(rod.tokenId, signer, price) : await repairFullOnChain(rod.tokenId, signer);
       alert('交易已发出，等待上链');
       await tx.wait();
       alert('✅ 鱼竿维护成功！');
@@ -193,9 +223,28 @@ export default function RodDetailPage() {
       const web3 = new ethers.BrowserProvider((window as any).ethereum);
       await web3.send('eth_requestAccounts', []);
       const signer = await web3.getSigner();
+
+      // guard ownership
+      try {
+        const signerAddr = await signer.getAddress();
+        const ownerOnChain = await getOwnerOf(rod.tokenId, web3);
+        if (ownerOnChain && ownerOnChain.toLowerCase() !== signerAddr.toLowerCase()) {
+          alert('你不是这把鱼竿的持有者，无法执行维修');
+          setIsProcessing(false);
+          setShowRepairModal(false);
+          return;
+        }
+      } catch (e) {}
+
+      let price: any = null;
+      try {
+        price = restore === 100 ? await getFullRepairCost(rod.tokenId, web3) : await getPartialRepairCost(rod.tokenId, restore, web3);
+      } catch (e) {
+        price = null;
+      }
       const tx = restore === 100
-        ? await repairFullOnChain(rod.tokenId, signer)
-        : await repairPartialOnChain(rod.tokenId, restore, signer);
+        ? (price ? await repairFullOnChain(rod.tokenId, signer, price) : await repairFullOnChain(rod.tokenId, signer))
+        : (price ? await repairPartialOnChain(rod.tokenId, restore, signer, price) : await repairPartialOnChain(rod.tokenId, restore, signer));
       alert('交易已发出，等待上链');
       await tx.wait();
       alert(restore === 100 ? '✅ 鱼竿全量维修成功！' : '✅ 鱼竿部分维修成功！');
@@ -213,9 +262,11 @@ export default function RodDetailPage() {
     const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
     setIsProcessing(true);
     try {
-      const provider = typeof window !== 'undefined' && (window as any).ethereum
-        ? new ethers.BrowserProvider((window as any).ethereum)
-        : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+      const provider = process.env.NEXT_PUBLIC_RPC_URL
+        ? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL)
+        : (typeof window !== 'undefined' && (window as any).ethereum
+          ? new ethers.BrowserProvider((window as any).ethereum)
+          : new ethers.JsonRpcProvider('http://127.0.0.1:8545'));
       if (SIMULATE) {
         const sim = await simulateUpgrade(rod.tokenId, rod.level, provider);
         const simPriceStr = sim.price && sim.price.toString && sim.price.toString() !== '0' ? ethers.formatEther(sim.price) + ' ETH' : (getUpgradeFeeLocal(rod.level) ?? '0') + ' tokens';
@@ -229,7 +280,36 @@ export default function RodDetailPage() {
       const web3 = new ethers.BrowserProvider((window as any).ethereum);
       await web3.send('eth_requestAccounts', []);
       const signer = await web3.getSigner();
-      const tx = await upgradeOnChain(rod.tokenId, signer);
+
+      // guard ownership and pending request
+      try {
+        const signerAddr = await signer.getAddress();
+        const ownerOnChain = await getOwnerOf(rod.tokenId, web3);
+        if (ownerOnChain && ownerOnChain.toLowerCase() !== signerAddr.toLowerCase()) {
+          alert('你不是这把鱼竿的持有者，无法执行升级');
+          setIsProcessing(false);
+          setShowUpgradeModal(false);
+          return;
+        }
+        const pending = await getPendingUpgradeRequestId(rod.tokenId, web3);
+        if (pending && pending.toString && pending.toString() !== '0') {
+          alert('该鱼竿已有正在处理的升级请求，请稍后再试');
+          setIsProcessing(false);
+          setShowUpgradeModal(false);
+          return;
+        }
+      } catch (e) {
+        // continue; best-effort
+      }
+
+      // fetch upgrade fee and pass as value so MetaMask shows correct amount
+      let price: any = null;
+      try {
+        price = await getUpgradeFee(rod.level, web3);
+      } catch (e) {
+        price = null;
+      }
+      const tx = price ? await upgradeOnChain(rod.tokenId, signer, price) : await upgradeOnChain(rod.tokenId, signer);
       alert('交易已发出，等待上链');
       await tx.wait();
       alert('🔔 升级交易已完成，结果将由链上事件决定');
@@ -519,7 +599,7 @@ export default function RodDetailPage() {
                   不同等级的成功率依次为 100% / 85% / 65% / 45% / 25%，失败不降级，费用不返还。
                 </div>
                 <div style={{ fontSize: "13px", color: "var(--brown)", lineHeight: "1.7" }}>
-                  数值增幅会随等级变化，与你的合约表一致：+0 到 +5 分别使用不同的随机区间。
+                  数值增幅会随等级变化，+0 到 +5 分别使用不同的随机区间。
                 </div>
               </div>
             </div>

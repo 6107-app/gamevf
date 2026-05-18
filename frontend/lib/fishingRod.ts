@@ -17,8 +17,35 @@ export const FISHING_ROD_ABI = [
   "function partialRepairCost(uint256 tokenId, uint16 restoreDurability) view returns (uint256)",
 ] as const;
 
+// Add commonly used read-only items and event fragments so ethers can subscribe correctly
+export const FISHING_ROD_ABI_EXTENDED = [
+  ...FISHING_ROD_ABI,
+  "function pendingUpgradeRequestId(uint256 tokenId) view returns (uint256)",
+  "function repairToken() view returns (address)",
+  "event UpgradeResolved(uint256 indexed tokenId, bool success, uint8 newLevel, uint8 attr, uint16 deltaBps)",
+] as const;
+
 export function getFishingRodContract(signerOrProvider: ethers.Signer | ethers.Provider) {
-  return new ethers.Contract(FISHING_ROD_ADDRESS, FISHING_ROD_ABI, signerOrProvider);
+  // Use extended ABI so event fragments and extra view functions are available
+  return new ethers.Contract(FISHING_ROD_ADDRESS, FISHING_ROD_ABI_EXTENDED, signerOrProvider as any);
+}
+
+export async function getPendingUpgradeRequestId(tokenId: number, provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  try {
+    return await c.pendingUpgradeRequestId(tokenId);
+  } catch (e) {
+    return 0;
+  }
+}
+
+export async function getRepairTokenAddress(provider: ethers.Provider) {
+  const c = getFishingRodContract(provider);
+  try {
+    return await c.repairToken();
+  } catch (e) {
+    return '0x0000000000000000000000000000000000000000';
+  }
 }
 
 async function resolveToSigner(signerOrProvider: any): Promise<ethers.Signer> {
@@ -191,13 +218,13 @@ export async function simulateMint(rodType: number, provider: ethers.Provider) {
   const price = await c.mintPriceWei(rodType);
   let gasEstimate: any = null;
   try {
-    gasEstimate = await c.estimateGas.mintRod(rodType, { value: price });
+    gasEstimate = await (c.estimateGas as any).mintRod(rodType, { value: price });
   } catch (e) {
     // ignore
   }
   let callResult: any = null;
   try {
-    callResult = await c.callStatic.mintRod(rodType, { value: price });
+    callResult = await (c.callStatic as any).mintRod(rodType, { value: price });
   } catch (e) {
     // callStatic may revert; ignore
   }
@@ -206,28 +233,28 @@ export async function simulateMint(rodType: number, provider: ethers.Provider) {
 
 export async function simulateRepairFull(tokenId: number, provider: ethers.Provider) {
   const c = getFishingRodContract(provider);
-  let price: any = ethers.BigNumber.from(0);
+  let price: any = ethers.parseEther('0');
   try {
     price = await c.fullRepairCost(tokenId);
   } catch (e) {
     // fallback: cannot resolve token -> use caller provided via frontend mapping (best-effort)
     // Return price as 0 here; callers may use frontend's getFullRepairCostLocal with rod type and level
-    price = ethers.BigNumber.from(0);
+    price = ethers.parseEther('0');
   }
   let gasEstimate: any = null;
   try {
-    gasEstimate = await c.estimateGas.repairFull(tokenId, { value: price });
+    gasEstimate = await (c.estimateGas as any).repairFull(tokenId, { value: price });
   } catch (e) {}
   let callResult: any = null;
   try {
-    callResult = await c.callStatic.repairFull(tokenId, { value: price });
+    callResult = await (c.callStatic as any).repairFull(tokenId, { value: price });
   } catch (e) {}
   return { price, gasEstimate, callResult };
 }
 
 export async function simulateUpgrade(tokenId: number, level: number | null, provider: ethers.Provider) {
   const c = getFishingRodContract(provider);
-  let price: any = ethers.BigNumber.from(0);
+  let price: any = ethers.parseEther('0');
   try {
     if (level !== null && level !== undefined) price = await c.upgradeFeeWei(level);
   } catch (e) {
@@ -237,7 +264,7 @@ export async function simulateUpgrade(tokenId: number, level: number | null, pro
 
   let gasEstimate: any = null;
   try {
-    gasEstimate = await c.estimateGas.upgrade(tokenId, { value: price });
+    gasEstimate = await (c.estimateGas as any).upgrade(tokenId, { value: price });
   } catch (e) {}
 
   // Local simulated attribute outcome (frontend-only) so UI can preview
@@ -245,7 +272,7 @@ export async function simulateUpgrade(tokenId: number, level: number | null, pro
 
   let callResult: any = null;
   try {
-    callResult = await c.callStatic.upgrade(tokenId, { value: price });
+    callResult = await (c.callStatic as any).upgrade(tokenId, { value: price });
   } catch (e) {}
   return { price, gasEstimate, callResult, simulated };
 }
