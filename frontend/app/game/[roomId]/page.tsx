@@ -4,6 +4,8 @@ import { useRouter, useParams } from "next/navigation";
 import { useContract } from "@/lib/ethereum";
 import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES, TIER_NAMES, RARITY_NAMES, PLAYER_STATUS } from "@/lib/contract";
 import { ethers } from "ethers";
+import { fetchRodsForOwner } from "@/lib/fishingRod";
+import { type RodData, ROD_TYPES, generateMockRods } from "@/lib/rod";
 
 // ── 游戏状态枚举 ─────────────────────────────────────────
 type GamePhase =
@@ -123,6 +125,14 @@ function GameScreen() {
   const [others, setOthers] = useState<OtherPlayer[]>(MOCK_OTHERS);
   const [recastFee, setRecastFee] = useState("0.01");
   const [txPending, setTxPending] = useState(false);
+  const [ownedRods, setOwnedRods] = useState<RodData[]>([]);
+  const [selectedRodId, setSelectedRodId] = useState<number>(0);
+  const [rodSource, setRodSource] = useState<"wallet" | "demo">("demo");
+  const activeRods = rodSource === "wallet" ? ownedRods : generateMockRods();
+  const usableRods = activeRods.filter(rod => rod.durability > 0);
+  const selectedRod = usableRods.find(rod => rod.tokenId === selectedRodId) ?? null;
+  const canStartFishing = selectedRod !== null;
+  const isDemoFishing = rodSource === "demo";
 
   // Fetch room data from contract (pot, recast fee, other players)
   const fetchGameData = useCallback(async () => {
@@ -173,6 +183,41 @@ function GameScreen() {
   useEffect(() => {
     fetchGameData();
   }, [fetchGameData]);
+
+  useEffect(() => {
+    const loadOwnedRods = async () => {
+      if (!wallet.address) {
+        setOwnedRods([]);
+        setRodSource("demo");
+        setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+        return;
+      }
+
+      try {
+        const provider = wallet.provider
+          ? wallet.provider
+          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545");
+        const rods = await fetchRodsForOwner(wallet.address, provider, 200);
+        setOwnedRods(rods);
+        const usable = rods.filter(rod => rod.durability > 0);
+        if (usable.length > 0) {
+          setRodSource("wallet");
+          setSelectedRodId(prev => {
+            if (prev && usable.some(rod => rod.tokenId === prev)) return prev;
+            return usable[0]?.tokenId ?? 0;
+          });
+        } else {
+          setRodSource("demo");
+          setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+        }
+      } catch {
+        setRodSource("demo");
+        setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+      }
+    };
+
+    loadOwnedRods();
+  }, [wallet.address, wallet.provider]);
 
   // Listen for contract events
   useEffect(() => {
@@ -257,7 +302,12 @@ function GameScreen() {
   const handleCast = useCallback(async () => {
     if (phase !== "waiting_cast" || txPending) return;
 
-    if (!isContractReady || !roomId) {
+    if (!canStartFishing) {
+      alert("请先选择一把可用的鱼竿。");
+      return;
+    }
+
+    if (!isContractReady || !roomId || isDemoFishing) {
       // Mock fallback
       setPhase("waiting_vrf");
       setTimeout(() => setPhase("reeling"), 2000);
@@ -270,7 +320,7 @@ function GameScreen() {
     setTxPending(true);
     setPhase("waiting_vrf");
     try {
-      const tx = await contract.cast(Number(roomId));
+      const tx = await contract.cast(Number(roomId), selectedRodId || 0);
       await tx.wait();
       // Wait for FishCaught event to update fish result
       // If VRF is async, we stay in waiting_vrf until the event fires
@@ -283,7 +333,7 @@ function GameScreen() {
     } finally {
       setTxPending(false);
     }
-  }, [phase, txPending, isContractReady, roomId, getWriteContract]);
+  }, [phase, txPending, isContractReady, roomId, getWriteContract, selectedRodId, canStartFishing, isDemoFishing]);
 
   // 收竿结果 (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
@@ -334,10 +384,15 @@ function GameScreen() {
   };
 
   // 重投
-  const handleRecast = async () => {
+  const handleRecast = useCallback(async () => {
     if (castCount >= 3) return;
 
-    if (!isContractReady || !roomId) {
+    if (!canStartFishing) {
+      alert("请先选择一把可用的鱼竿。");
+      return;
+    }
+
+    if (!isContractReady || !roomId || isDemoFishing) {
       setPhase("dice_roll");
       return;
     }
@@ -347,7 +402,7 @@ function GameScreen() {
 
     setTxPending(true);
     try {
-      const tx = await contract.recast(Number(roomId), {
+      const tx = await contract.recast(Number(roomId), selectedRodId || 0, {
         value: ethers.parseEther(recastFee),
       });
       await tx.wait();
@@ -359,7 +414,7 @@ function GameScreen() {
     } finally {
       setTxPending(false);
     }
-  };
+  }, [castCount, isContractReady, roomId, getWriteContract, recastFee, selectedRodId, canStartFishing, isDemoFishing]);
 
   // 骰子结果 (mock fallback)
   const handleDiceFinish = (buff: { text: string; isBuff: boolean }) => {
@@ -381,7 +436,7 @@ function GameScreen() {
       overflow: "hidden", position: "relative",
       background: "linear-gradient(180deg, #87CEEB 0%, #B8E4F9 35%, #4A9DB5 60%, #2E6B8A 100%)",
     }}
-    onClick={phase === "waiting_cast" && !txPending ? handleCast : undefined}
+    onClick={undefined}
     >
       {/* 背景层 */}
       <GameBackground />
@@ -395,6 +450,19 @@ function GameScreen() {
 
       {/* 右侧玩家状态 */}
       <PlayerSidebar players={others} />
+
+      {/* 鱼竿选择 */}
+      {phase === "waiting_cast" && (
+        <RodSelectionPanel
+          rods={usableRods}
+          selectedRodId={selectedRodId}
+          canStartFishing={canStartFishing}
+          isDemoFishing={isDemoFishing}
+          hasWalletRods={ownedRods.length > 0}
+          onSelect={setSelectedRodId}
+          onStart={handleCast}
+        />
+      )}
 
       {/* 左侧 Buff 区 */}
       {buffs.length > 0 && <BuffArea buffs={buffs} />}
@@ -613,6 +681,200 @@ function BuffArea({ buffs }: { buffs: string[] }) {
             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
           }}>{b}</div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing, hasWalletRods, onSelect, onStart }: {
+  rods: RodData[];
+  selectedRodId: number;
+  canStartFishing: boolean;
+  isDemoFishing: boolean;
+  hasWalletRods: boolean;
+  onSelect: (tokenId: number) => void;
+  onStart: () => void;
+}) {
+  const selectedRod = rods.find(rod => rod.tokenId === selectedRodId) ?? null;
+
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 90,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "rgba(18, 55, 74, 0.22)",
+      backdropFilter: "blur(5px)",
+      padding: "24px",
+    }}>
+      <div style={{
+        width: "min(1040px, 100%)",
+        borderRadius: "30px",
+        background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,244,236,0.98))",
+        boxShadow: "0 28px 90px rgba(12, 32, 48, 0.30)",
+        border: "1px solid rgba(139,99,85,0.16)",
+        overflow: "hidden",
+      }}>
+        <div style={{
+          padding: "22px 24px 14px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: "1px solid rgba(139,99,85,0.10)",
+        }}>
+          <div>
+            <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--brown)", marginBottom: "6px" }}>我的鱼竿</div>
+            <div style={{ fontSize: "14px", color: "var(--brown-light)" }}>
+              先选一把鱼竿，再点击开始钓鱼
+            </div>
+          </div>
+          <div style={{ fontSize: "30px" }}>🎣</div>
+        </div>
+
+        <div style={{ padding: "20px 24px 24px" }}>
+          {rods.length === 0 ? (
+            <div style={{
+              padding: "18px 16px",
+              borderRadius: "18px",
+              background: "var(--cream)",
+              color: "var(--brown-light)",
+              fontSize: "14px",
+              lineHeight: 1.7,
+            }}>
+              当前没有可用鱼竿。下面会给你一组 demo 鱼竿，方便先体验钓鱼流程。
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "14px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
+              {rods.map(rod => {
+                const info = ROD_TYPES[rod.type];
+                const isSelected = rod.tokenId === selectedRodId;
+                const effectTags = [
+                  `Speed ${rod.attributes.speedBonus ?? 0}%`,
+                  `Weight ${rod.attributes.weightBonus ?? 0}%`,
+                  `Luck ${rod.attributes.luckBonus ?? 0}%`,
+                  `Stability ${Math.round((rod.attributes.stabilityBps ?? 0) / 100)}%`,
+                ];
+                return (
+                  <button
+                    key={rod.tokenId}
+                    onClick={() => onSelect(rod.tokenId)}
+                    style={{
+                      textAlign: "left",
+                      width: "100%",
+                      border: `1px solid ${isSelected ? "var(--coral)" : "rgba(139,99,85,0.12)"}`,
+                      background: isSelected ? "linear-gradient(180deg, rgba(255,123,107,0.12), rgba(255,255,255,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,248,243,0.98))",
+                      borderRadius: "20px",
+                      padding: "16px",
+                      cursor: "pointer",
+                      boxShadow: isSelected ? "0 14px 30px rgba(255,123,107,0.14)" : "0 8px 20px rgba(12, 32, 48, 0.06)",
+                      minHeight: "190px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                        <div style={{
+                          width: "52px",
+                          height: "52px",
+                          borderRadius: "16px",
+                          background: isSelected ? "linear-gradient(135deg, rgba(255,123,107,0.18), rgba(255,223,126,0.22))" : "var(--cream)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "30px",
+                          flexShrink: 0,
+                        }}>{info.icon}</div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: "16px", fontWeight: 800, color: "var(--brown)" }}>
+                            #{rod.tokenId} · {info.name}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "var(--brown-light)", marginTop: "4px" }}>
+                            Lv.{rod.level} · 耐久 {rod.durability}/{rod.maxDurability}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{
+                        fontSize: "11px",
+                        fontWeight: 800,
+                        color: isSelected ? "var(--coral)" : "var(--brown-light)",
+                        padding: "6px 10px",
+                        borderRadius: "999px",
+                        background: isSelected ? "rgba(255,123,107,0.12)" : "rgba(139,99,85,0.07)",
+                      }}>
+                        {isSelected ? "已选中" : "选择"}
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: "14px", fontSize: "12px", color: "var(--brown)", fontWeight: 700 }}>
+                      本局会影响
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                      {effectTags.map(tag => (
+                        <span key={tag} style={{
+                          padding: "5px 9px",
+                          borderRadius: "999px",
+                          background: "rgba(139,99,85,0.06)",
+                          fontSize: "11px",
+                          color: "var(--brown)",
+                        }}>{tag}</span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedRod && (
+            <div style={{
+              marginTop: "16px",
+              padding: "14px 16px",
+              borderRadius: "18px",
+              background: isDemoFishing ? "linear-gradient(135deg, rgba(37,99,235,0.10), rgba(14,165,233,0.12))" : "linear-gradient(135deg, rgba(255,123,107,0.10), rgba(255,223,126,0.14))",
+              fontSize: "13px",
+              color: "var(--brown)",
+              lineHeight: 1.7,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "16px",
+              alignItems: "center",
+            }}>
+              <div>
+                当前将使用 #{selectedRod.tokenId} 号鱼竿。
+                {isDemoFishing && <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>这是 demo 鱼竿，可以直接体验完整钓鱼流程。</div>}
+              </div>
+              <div style={{ fontSize: "14px", fontWeight: 800 }}>
+                {canStartFishing ? "可开始" : "不可用"}
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            marginTop: "18px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}>
+            <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>
+              {hasWalletRods ? "已读取钱包鱼竿" : "当前使用 demo 鱼竿数据"}
+            </div>
+            <button
+              className="btn-primary"
+              onClick={onStart}
+              disabled={!canStartFishing}
+              style={{
+                minWidth: "160px",
+                opacity: canStartFishing ? 1 : 0.5,
+                cursor: canStartFishing ? "pointer" : "not-allowed",
+              }}
+            >
+              开始钓鱼
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

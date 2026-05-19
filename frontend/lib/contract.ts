@@ -16,9 +16,9 @@ export const FISHING_GAME_ABI = [
   "function createRoom(uint8 tier, bool isPublic, bool isLivestream) payable returns (uint256 roomId)",
   "function joinRoom(uint256 roomId) payable",
   "function startGame(uint256 roomId)",
-  "function cast(uint256 roomId)",
+  "function cast(uint256 roomId, uint256 rodTokenId)",
   "function lockIn(uint256 roomId)",
-  "function recast(uint256 roomId) payable",
+  "function recast(uint256 roomId, uint256 rodTokenId) payable",
   "function forceComplete(uint256 roomId)",
 
   "event RoomCreated(uint256 indexed roomId, address indexed host, uint8 tier, bool isPublic, uint256 entryFee, uint256 timestamp)",
