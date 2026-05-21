@@ -9,10 +9,12 @@ import "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol";
 import "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.sol";
 
 contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
+    // ─── Enums ──────────────────────────────────────────
     enum RodType { Driftwood, Tidebreaker, Leviathan, AbyssWhisper }
     enum RodRarity { Common, Rare, SuperRare, Epic, Legendary }
     enum UpgradeAttr { Speed, Weight, Luck, Stability }
 
+    // ─── Rod Data ───────────────────────────────────────
     struct Rod {
         RodType rodType;
         RodRarity rarity;
@@ -25,18 +27,22 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         uint16 stabilityBps;
     }
 
+    // ─── VRF Config ─────────────────────────────────────
     IVRFCoordinatorV2Plus private immutable i_vrfCoordinator;
     bytes32 public s_keyHash;
     uint256 public s_subscriptionId;
     uint16 public constant REQUEST_CONFIRMATIONS = 3;
     uint32 public constant CALLBACK_GAS_LIMIT = 300_000;
 
+    // ─── NFT Storage ────────────────────────────────────
     uint256 private _nextTokenId;
     mapping(uint256 => Rod) private _rods;
 
+    // ─── Game Hook & Repair Payment ─────────────────────
     address public gameContract;
     IERC20 public repairToken;
 
+    // ─── Upgrade Requests (VRF) ─────────────────────────
     struct UpgradeRequest {
         uint256 tokenId;
         address requester;
@@ -45,6 +51,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
     mapping(uint256 => UpgradeRequest) public upgradeRequests;
     mapping(uint256 => uint256) public pendingUpgradeRequestId;
 
+    // ─── Events ─────────────────────────────────────────
     event RodMinted(uint256 indexed tokenId, address indexed owner, uint8 rodType, uint8 rarity);
     event DurabilityConsumed(uint256 indexed tokenId, uint16 amount, uint16 remaining);
     event RodRepaired(uint256 indexed tokenId, uint16 restoredTo, uint256 cost);
@@ -53,6 +60,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
     event GameContractSet(address indexed gameContract);
     event RepairTokenSet(address indexed token);
 
+    // ─── Errors ─────────────────────────────────────────
     error NotTokenOwner();
     error InvalidToken();
     error IncorrectPayment();
@@ -62,6 +70,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
     error MaxLevelReached();
     error InvalidRepairAmount();
 
+    // ─── Constructor ────────────────────────────────────
     constructor(
         address vrfCoordinator,
         bytes32 keyHash,
@@ -73,6 +82,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         _nextTokenId = 1;
     }
 
+    // ─── Admin ──────────────────────────────────────────
     function setGameContract(address _gameContract) external onlyOwner {
         gameContract = _gameContract;
         emit GameContractSet(_gameContract);
@@ -83,6 +93,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit RepairTokenSet(token);
     }
 
+    // ─── Mint ───────────────────────────────────────────
     function mintRod(RodType rodType) external payable nonReentrant returns (uint256 tokenId) {
         uint256 price = mintPriceWei(rodType);
         _collectEth(price);
@@ -107,6 +118,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit RodMinted(tokenId, msg.sender, uint8(rodType), uint8(rarity));
     }
 
+    // ─── Durability (only FishingGame) ──────────────────
     function consumeDurability(uint256 tokenId, uint16 amount) external {
         if (msg.sender != gameContract) revert Unauthorized();
         if (!_tokenExists(tokenId)) revert InvalidToken();
@@ -122,6 +134,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit DurabilityConsumed(tokenId, amount, r.durability);
     }
 
+    // ─── Repair ─────────────────────────────────────────
     function repairFull(uint256 tokenId) external payable nonReentrant {
         _repair(tokenId, type(uint16).max);
     }
@@ -131,6 +144,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         _repair(tokenId, restoreDurability);
     }
 
+    // ─── Upgrade (VRF) ──────────────────────────────────
     function upgrade(uint256 tokenId) external payable nonReentrant returns (uint256 requestId) {
         if (!_tokenExists(tokenId)) revert InvalidToken();
         if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
@@ -161,6 +175,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit UpgradeRequested(tokenId, requestId, msg.sender, r.level);
     }
 
+    // ─── VRF Callback ───────────────────────────────────
     function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
         UpgradeRequest memory req = upgradeRequests[requestId];
         if (req.tokenId == 0) return;
@@ -196,6 +211,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit UpgradeResolved(req.tokenId, true, r.level, uint8(attr), delta);
     }
 
+    // ─── Views ──────────────────────────────────────────
     function getRodBonus(uint256 tokenId) external view returns (uint256 speedBonus, uint256 weightBonus, uint256 luckBonus) {
         if (!_tokenExists(tokenId)) return (0, 0, 0);
         Rod storage r = _rods[tokenId];
@@ -207,6 +223,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         return _rods[tokenId];
     }
 
+    // ─── Pricing ────────────────────────────────────────
     function mintPriceWei(RodType rodType) public pure returns (uint256) {
         if (rodType == RodType.Driftwood) return 0.01 ether;
         if (rodType == RodType.Tidebreaker) return 0.05 ether;
@@ -239,6 +256,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         revert InvalidRepairAmount();
     }
 
+    // ─── Internal: Repair ───────────────────────────────
     function _repair(uint256 tokenId, uint16 restoreDurability) internal {
         if (!_tokenExists(tokenId)) revert InvalidToken();
         if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
@@ -264,6 +282,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         emit RodRepaired(tokenId, r.durability, cost);
     }
 
+    // ─── Admin: Withdraw ────────────────────────────────
     function withdrawEth(address payable to, uint256 amount) external onlyOwner {
         (bool ok, ) = to.call{value: amount}("");
         require(ok, "withdraw failed");
@@ -275,6 +294,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         require(ok, "transfer failed");
     }
 
+    // ─── Internal: Payment Collection ───────────────────
     function _collectEth(uint256 amount) internal {
         if (msg.value != amount) revert IncorrectPayment();
     }
@@ -290,6 +310,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         require(ok, "transferFrom failed");
     }
 
+    // ─── Internal: Base Stats & RNG Tables ──────────────
     function _initialStats(RodType rodType) internal pure returns (
         RodRarity rarity,
         uint16 speedBps,
@@ -386,6 +407,7 @@ contract FishingRod is ERC721, ReentrancyGuard, VRFConsumerBaseV2Plus {
         return uint16(v);
     }
 
+    // ─── Internal: ERC721 Existence ─────────────────────
     function _tokenExists(uint256 tokenId) internal view returns (bool) {
         return _ownerOf(tokenId) != address(0);
     }
