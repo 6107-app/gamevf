@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import { ROD_CONFIG, UPGRADE_FEES_ETH, getUpgradeFeeLocal, sampleUpgradeResult, type RodData } from "./rod";
 
-export const FISHING_ROD_ADDRESS = process.env.NEXT_PUBLIC_FISHING_ROD_ADDRESS || "0x0000000000000000000000000000000000000000";
+export const FISHING_ROD_ADDRESS = process.env.NEXT_PUBLIC_ROD_ADDRESS || "0x0000000000000000000000000000000000000000";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export const FISHING_ROD_ABI = [
@@ -141,57 +141,68 @@ export async function getOwnerOf(tokenId: number, provider: ethers.Provider) {
 }
 
 // Fetch rods owned by `owner` by scanning token IDs from 1..maxToken (view-only).
-export async function fetchRodsForOwner(owner: string, provider: ethers.Provider, maxToken = 200) {
+export async function fetchRodsForOwner(
+  owner: string,
+  provider: ethers.Provider,
+  maxToken = 200
+): Promise<RodData[]> {
   const c = getFishingRodContract(provider);
   const found: RodData[] = [];
 
+  // ── 优先走事件日志（快，不产生大量 revert）──────────────
   try {
     const filter = (c as any).filters?.RodMinted?.(null, owner);
     if (filter) {
       const logs = await (c as any).queryFilter(filter, 0, "latest");
-      const ids = logs
-        .map((l: any) => Number(l?.args?.tokenId?.toString?.() ?? l?.args?.[0]))
-        .filter((n: number) => Number.isFinite(n) && n > 0);
-      const tokenIds: number[] = Array.from(new Set<number>(ids));
-      tokenIds.sort((a, b) => a - b);
+      const tokenIds: number[] = Array.from(
+        new Set<number>(
+          logs
+            .map((l: any) => Number(l?.args?.tokenId ?? l?.args?.[0]))
+            .filter((n: number) => Number.isFinite(n) && n > 0)
+        )
+      ).sort((a, b) => a - b);
 
       if (tokenIds.length > 0) {
         for (const tokenId of tokenIds) {
           try {
-            const o = await c.ownerOf(tokenId);
-            if (!o || o.toLowerCase() !== owner.toLowerCase()) continue;
+            const ownerAddr = await c.ownerOf(tokenId);
+            if (ownerAddr.toLowerCase() !== owner.toLowerCase()) continue;
             const mapped = await getRodOnChain(tokenId, provider);
             if (mapped) {
-              mapped.owner = o;
+              mapped.owner = ownerAddr;
               found.push(mapped);
             }
           } catch {
+            // 单个 token 失败不影响其他
           }
         }
         return found;
       }
     }
   } catch {
+    // 事件查询失败，fallback 到扫描
   }
 
-  const calls: Promise<void>[] = [] as any;
+  // ── Fallback：顺序扫描，遇到连续 5 个不存在的 token 就停止 ──
+  let consecutiveMissing = 0;
   for (let id = 1; id <= maxToken; id++) {
-    calls.push((async (tokenId: number) => {
-      try {
-        const o = await c.ownerOf(tokenId);
-        if (o && o.toLowerCase() === owner.toLowerCase()) {
-          const mapped = await getRodOnChain(tokenId, provider);
-          if (mapped) {
-            mapped.owner = o;
-            found.push(mapped);
-          }
+    try {
+      const ownerAddr = await c.ownerOf(id);
+      consecutiveMissing = 0; // 重置计数
+      if (ownerAddr.toLowerCase() === owner.toLowerCase()) {
+        const mapped = await getRodOnChain(id, provider);
+        if (mapped) {
+          mapped.owner = ownerAddr;
+          found.push(mapped);
         }
-      } catch (e) {
-        // ignore
       }
-    })(id));
+    } catch {
+      consecutiveMissing++;
+      // ERC721 tokenId 是连续的，连续 5 个不存在说明已到末尾
+      if (consecutiveMissing >= 5) break;
+    }
   }
-  await Promise.all(calls);
+
   return found;
 }
 

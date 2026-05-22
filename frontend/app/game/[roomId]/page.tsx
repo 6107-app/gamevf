@@ -132,10 +132,13 @@ function GameScreen() {
   const [rodSource, setRodSource] = useState<"wallet" | "demo">("demo");
   const activeRods = rodSource === "wallet" ? ownedRods : generateMockRods();
   const usableRods = activeRods.filter(rod => rod.durability > 0);
-  const eligibleRods = usableRods.filter(rod => rod.level >= requiredRodLevel);
+  const eligibleRods = rodSource === "wallet"
+  ? usableRods.filter(rod => rod.level >= requiredRodLevel)
+  : usableRods; // demo 鱼竿全部可用
   const selectedRod = eligibleRods.find(rod => rod.tokenId === selectedRodId) ?? null;
-  const canStartFishing = selectedRod !== null;
   const isDemoFishing = rodSource === "demo";
+  const canStartFishing = selectedRod !== null || (isDemoFishing && usableRods.length > 0);
+  
 
   // Fetch room data from contract (pot, recast fee, other players)
   const fetchGameData = useCallback(async () => {
@@ -191,35 +194,43 @@ function GameScreen() {
     fetchGameData();
   }, [fetchGameData]);
 
+  // 找到 useEffect for loadOwnedRods，在 setRodSource("demo") 的地方统一处理
   useEffect(() => {
     const loadOwnedRods = async () => {
       if (!wallet.address) {
         setOwnedRods([]);
         setRodSource("demo");
-        setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+        const mockRods = generateMockRods();
+        setSelectedRodId(mockRods[0]?.tokenId ?? 1); // ← 确保有默认值
         return;
       }
 
       try {
         const provider = wallet.provider
           ? wallet.provider
-          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545");
+          : new ethers.JsonRpcProvider(
+              process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545"
+            );
         const rods = await fetchRodsForOwner(wallet.address, provider, 200);
         setOwnedRods(rods);
         const usable = rods.filter(rod => rod.durability > 0);
+
         if (usable.length > 0) {
           setRodSource("wallet");
           setSelectedRodId(prev => {
             if (prev && usable.some(rod => rod.tokenId === prev)) return prev;
-            return usable[0]?.tokenId ?? 0;
+            return usable[0]!.tokenId;
           });
         } else {
+          // 钱包里没有可用鱼竿，fallback demo
           setRodSource("demo");
-          setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+          const mockRods = generateMockRods();
+          setSelectedRodId(mockRods[0]?.tokenId ?? 1);
         }
       } catch {
         setRodSource("demo");
-        setSelectedRodId(generateMockRods()[0]?.tokenId ?? 0);
+        const mockRods = generateMockRods();
+        setSelectedRodId(mockRods[0]?.tokenId ?? 1);
       }
     };
 
@@ -319,38 +330,41 @@ function GameScreen() {
   const handleCast = useCallback(async () => {
     if (phase !== "waiting_cast" || txPending) return;
 
-    if (!canStartFishing) {
-      alert("请先选择一把可用的鱼竿。");
+    // demo 模式或合约地址未配置：直接走 mock 流程，不需要鱼竿检查
+    if (!isContractReady || !roomId || isDemoFishing) {
+      setPhase("waiting_vrf");
+      setTimeout(() => setPhase("reeling"), 1500);
       return;
     }
 
-    if (!isContractReady || !roomId || isDemoFishing) {
-      // Mock fallback
-      setPhase("waiting_vrf");
-      setTimeout(() => setPhase("reeling"), 2000);
+    // 合约模式：必须有真实鱼竿
+    if (!canStartFishing) {
+      alert("请先选择一把可用的鱼竿。");
       return;
     }
 
     const contract = getWriteContract();
     if (!contract) return;
 
+    const rodIdToPass = rodSource === "wallet" ? (selectedRodId ?? 0) : 0;
+
     setTxPending(true);
     setPhase("waiting_vrf");
     try {
-      const tx = await contract.cast(Number(roomId), selectedRodId || 0);
+      const tx = await contract.cast(Number(roomId), rodIdToPass);
       await tx.wait();
-      // Wait for FishCaught event to update fish result
-      // If VRF is async, we stay in waiting_vrf until the event fires
-      // Set a fallback timeout to show reeling bar if event doesn't come quickly
       setTimeout(() => {
-        setPhase(prev => prev === "waiting_vrf" ? "reeling" : prev);
+        setPhase(prev => (prev === "waiting_vrf" ? "reeling" : prev));
       }, 5000);
-    } catch {
+    } catch (e: unknown) {
+      console.error("cast error:", e);
+      alert(e instanceof Error ? e.message : "抛竿失败");
       setPhase("waiting_cast");
     } finally {
       setTxPending(false);
     }
-  }, [phase, txPending, isContractReady, roomId, getWriteContract, selectedRodId, canStartFishing, isDemoFishing]);
+  }, [phase, txPending, isContractReady, roomId, getWriteContract,
+      selectedRodId, canStartFishing, isDemoFishing, rodSource]);
 
   // 收竿结果 (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
@@ -893,9 +907,13 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>
               {hasWalletRods ? "已读取钱包鱼竿" : "当前使用 demo 鱼竿数据"}
             </div>
+            // RodSelectionPanel 内，找到"开始钓鱼"按钮，替换
             <button
               className="btn-primary"
-              onClick={onStart}
+              onClick={() => {
+                console.log("开始钓鱼 clicked, canStartFishing:", canStartFishing);
+                onStart();          // 这会调用 handleCast
+              }}
               disabled={!canStartFishing}
               style={{
                 minWidth: "160px",
