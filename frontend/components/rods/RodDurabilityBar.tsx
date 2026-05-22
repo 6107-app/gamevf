@@ -36,7 +36,7 @@ export default function RodDurabilityBar({
         }}>
           <div
             className={`rod-durability-fill ${
-              status === "low" ? "rod-durability-low" : ""
+              status === "warning" ? "rod-durability-low" : ""
             } ${status === "critical" ? "rod-durability-critical" : ""}`}
             style={{
               width: `${percent}%`,

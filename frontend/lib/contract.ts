@@ -55,3 +55,31 @@ export function requiredRodLevelForTier(tier: RoomTier): number {
 export function getContract(signerOrProvider: ethers.Signer | ethers.Provider) {
   return new ethers.Contract(FISHING_GAME_ADDRESS, FISHING_GAME_ABI, signerOrProvider);
 }
+
+// ─── PredictionMarket ──────────────────────────────────────────────────────────
+export const PREDICTION_MARKET_ADDRESS =
+  process.env.NEXT_PUBLIC_PREDICTION_MARKET_ADDRESS ||
+  "0x0000000000000000000000000000000000000000";
+
+export const PREDICTION_MARKET_ABI = [
+  // Views
+  "function getMarketInfo(uint256 roomId) view returns (uint256 openedAt, uint256 totalPool, uint256 settledAt, address winner, bool bettingOpen, uint8 playerCount)",
+  "function getOdds(uint256 roomId, address player) view returns (uint256 playerWeighted, uint256 totalWeighted, uint256 impliedOddsBps)",
+  "function getMyBet(uint256 roomId, address bettor, address player) view returns (uint256)",
+  "function calcTimeWeight(uint256 elapsed) pure returns (uint256)",
+  "function hasClaimed(uint256, address) view returns (bool)",
+  // Actions
+  "function openBetting(uint256 roomId)",
+  "function placeBet(uint256 roomId, address predictedWinner) payable",
+  "function settleBets(uint256 roomId)",
+  "function claimPrize(uint256 roomId)",
+  // Events
+  "event BettingOpened(uint256 indexed roomId, uint256 timestamp, uint8 playerCount)",
+  "event BetPlaced(uint256 indexed roomId, address indexed bettor, address indexed predictedWinner, uint256 amount, uint256 timeWeight, uint256 weightedAmount)",
+  "event MarketSettled(uint256 indexed roomId, address winner, uint256 totalPool, uint256 platformFee)",
+  "event PrizeClaimed(uint256 indexed roomId, address indexed bettor, uint256 amount)",
+] as const;
+
+export function getPredictionMarketContract(signerOrProvider: ethers.Signer | ethers.Provider) {
+  return new ethers.Contract(PREDICTION_MARKET_ADDRESS, PREDICTION_MARKET_ABI, signerOrProvider);
+}
