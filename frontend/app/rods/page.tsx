@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
 import { RodData, ROD_TYPES } from "@/lib/rod";
@@ -9,8 +9,20 @@ import { ethers } from "ethers";
 import { getMintPrice, mintRodOnChain, fetchRodsForOwner, simulateMint } from "@/lib/fishingRod";
 import { useContract } from "@/lib/ethereum";
 
+type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
+
+const TIER_REQUIRED_LEVELS: Record<RoomTier, number> = {
+  "Bronze": 0,
+  "Silver": 1,
+  "Gold": 2,
+  "Diamond": 3,
+};
+
 export default function RodsHallPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requiredTier = searchParams.get("tier") as RoomTier | null;
+  
   const { wallet } = useContract();
   const [rods, setRods] = useState<RodData[]>([]);
   const [filterType, setFilterType] = useState<"All" | keyof typeof ROD_TYPES>("All");
@@ -56,6 +68,13 @@ export default function RodsHallPage() {
     return rod.type === filterType;
   });
 
+  // Apply tier filter if specified
+  const tierFiltered = requiredTier && TIER_REQUIRED_LEVELS[requiredTier] !== undefined
+    ? filtered.filter(rod => rod.level >= TIER_REQUIRED_LEVELS[requiredTier])
+    : filtered;
+
+  const requiredLevel = requiredTier ? TIER_REQUIRED_LEVELS[requiredTier] : null;
+
   const handleRodClick = (tokenId: number) => {
     router.push(`/rods/${tokenId}`);
   };
@@ -94,7 +113,9 @@ export default function RodsHallPage() {
             color: "var(--brown-light)",
             lineHeight: "1.6",
           }}>
-            展示你拥有的所有鱼竿。点击任意鱼竿查看详情、升级或维护它们。
+            {requiredTier
+              ? `${requiredTier} 房间需要等级 ${requiredLevel} 及以上的鱼竿。点击任意鱼竿进入房间。`
+              : "展示你拥有的所有鱼竿。点击任意鱼竿查看详情、升级或维护它们。"}
           </p>
         </div>
 
@@ -137,7 +158,7 @@ export default function RodsHallPage() {
         </div>
 
         {/* Rods Grid */}
-        {filtered.length === 0 ? (
+        {tierFiltered.length === 0 ? (
           <div style={{
             textAlign: "center",
             padding: "60px 20px",
@@ -145,7 +166,10 @@ export default function RodsHallPage() {
           }}>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>🎣</div>
             <p style={{ fontSize: "15px", marginBottom: "16px" }}>
-              {wallet.address ? "暂无此类鱼竿" : "请先连接钱包"}
+              {wallet.address ? requiredTier 
+                ? `没有等级 ${requiredLevel} 以上的鱼竿` 
+                : "暂无此类鱼竿" 
+                : "请先连接钱包"}
             </p>
             <button className="btn-primary" onClick={() => setFilterType("All")}>
               查看所有鱼竿
@@ -157,7 +181,7 @@ export default function RodsHallPage() {
             gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
             gap: "20px",
           }}>
-            {filtered.map(rod => (
+            {tierFiltered.map(rod => (
               <div key={rod.tokenId} onClick={() => handleRodClick(rod.tokenId)}>
                 <RodCard rod={rod} onClick={() => handleRodClick(rod.tokenId)} />
               </div>

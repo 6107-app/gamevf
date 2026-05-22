@@ -45,6 +45,13 @@ export const ROOM_STATUS = ["Waiting", "Active", "Finished"] as const;
 export const PLAYER_STATUS = ["Fishing", "LockedIn", "Recast"] as const;
 export const RARITY_NAMES = ["Common", "Rare", "SuperRare", "Epic", "Legendary"] as const;
 
+export function requiredRodLevelForTier(tier: RoomTier): number {
+  if (tier === "Bronze") return 0;
+  if (tier === "Silver") return 1;
+  if (tier === "Gold") return 2;
+  return 3;
+}
+
 export function getContract(signerOrProvider: ethers.Signer | ethers.Provider) {
   return new ethers.Contract(FISHING_GAME_ADDRESS, FISHING_GAME_ABI, signerOrProvider);
 }

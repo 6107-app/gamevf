@@ -129,6 +129,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     error PlayerAlreadyLockedIn();
     error NotRodOwner();
     error InvalidRod();
+    error InsufficientRodLevel();
 
     // ─── Events ─────────────────────────────────────────
     event RoomCreated(uint256 indexed roomId, address indexed host, RoomTier tier, bool isPublic, uint256 entryFee, uint256 timestamp);
@@ -171,6 +172,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         bool isLivestream
     ) external payable nonReentrant returns (uint256 roomId) {
         if (msg.value != entryFees[tier]) revert IncorrectFee();
+        
+        // Verify host has a rod with sufficient level for this room tier
+        if (!_hasRodForTier(msg.sender, tier)) revert InsufficientRodLevel();
 
         roomId = roomCount++;
         Room storage room = rooms[roomId];
@@ -214,6 +218,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         if (room.playerCount >= 4) revert RoomFull();
         if (msg.value != room.entryFee) revert IncorrectFee();
         if (room.isPlayer[msg.sender]) revert AlreadyInRoom();
+        
+        // Verify player has a rod with sufficient level for this room tier
+        if (!_hasRodForTier(msg.sender, room.tier)) revert InsufficientRodLevel();
 
         uint8 idx = room.playerCount;
         room.players[idx] = msg.sender;
@@ -522,6 +529,38 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             if (time <= TIME_THRESHOLDS[i]) return TIME_COEFFICIENTS[i];
         }
         return TIME_COEFFICIENTS[3];
+    }
+
+    // ─── Rod Level Validation ───────────────────────────
+    function _getRequiredRodLevel(RoomTier tier) internal pure returns (uint8) {
+        if (tier == RoomTier.Bronze) return 0;   // Any level rod
+        if (tier == RoomTier.Silver) return 1;   // Need level 1+
+        if (tier == RoomTier.Gold) return 2;     // Need level 2+
+        return 3;                                 // Diamond: Need level 3+
+    }
+
+    function _hasRodForTier(address player, RoomTier tier) internal view returns (bool) {
+        if (address(rodContract) == address(0)) return true; // If rod contract not set, allow all
+        
+        uint8 requiredLevel = _getRequiredRodLevel(tier);
+        uint256 maxTokenId = 200; // Scan up to 200 tokens
+        
+        for (uint256 tokenId = 1; tokenId <= maxTokenId; tokenId++) {
+            try rodContract.ownerOf(tokenId) returns (address owner) {
+                if (owner == player) {
+                    // Get rod level
+                    (, , uint8 level, , , , , , ) = rodContract.getRod(tokenId);
+                    if (level >= requiredLevel) {
+                        return true; // Found a rod with sufficient level
+                    }
+                }
+            } catch {
+                // Token doesn't exist, continue
+                continue;
+            }
+        }
+        
+        return false; // No rod with sufficient level found
     }
 
     function _syncRodSnapshot(uint256 roomId, Player storage player, address playerAddr, uint256 rodTokenId) internal {

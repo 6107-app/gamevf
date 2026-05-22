@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useContract } from "@/lib/ethereum";
-import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES, TIER_NAMES, RARITY_NAMES, PLAYER_STATUS } from "@/lib/contract";
+import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES, TIER_NAMES, RARITY_NAMES, PLAYER_STATUS, requiredRodLevelForTier, type RoomTier } from "@/lib/contract";
 import { ethers } from "ethers";
 import { fetchRodsForOwner } from "@/lib/fishingRod";
 import { type RodData, ROD_TYPES, generateMockRods } from "@/lib/rod";
@@ -124,13 +124,16 @@ function GameScreen() {
   const [diceResult, setDiceResult] = useState<{ text: string; isBuff: boolean } | null>(null);
   const [others, setOthers] = useState<OtherPlayer[]>(MOCK_OTHERS);
   const [recastFee, setRecastFee] = useState("0.01");
+  const [roomTier, setRoomTier] = useState<RoomTier>("Bronze");
+  const [requiredRodLevel, setRequiredRodLevel] = useState<number>(0);
   const [txPending, setTxPending] = useState(false);
   const [ownedRods, setOwnedRods] = useState<RodData[]>([]);
   const [selectedRodId, setSelectedRodId] = useState<number>(0);
   const [rodSource, setRodSource] = useState<"wallet" | "demo">("demo");
   const activeRods = rodSource === "wallet" ? ownedRods : generateMockRods();
   const usableRods = activeRods.filter(rod => rod.durability > 0);
-  const selectedRod = usableRods.find(rod => rod.tokenId === selectedRodId) ?? null;
+  const eligibleRods = usableRods.filter(rod => rod.level >= requiredRodLevel);
+  const selectedRod = eligibleRods.find(rod => rod.tokenId === selectedRodId) ?? null;
   const canStartFishing = selectedRod !== null;
   const isDemoFishing = rodSource === "demo";
 
@@ -148,6 +151,10 @@ function GameScreen() {
       // Determine recast fee from tier
       const tierIndex = Number(info.tier);
       const tierName = TIER_NAMES[tierIndex];
+      if (tierName) {
+        setRoomTier(tierName as RoomTier);
+        setRequiredRodLevel(requiredRodLevelForTier(tierName as RoomTier));
+      }
       if (tierName && tierName in TIER_ENTRY_FEES) {
         setRecastFee(TIER_ENTRY_FEES[tierName as keyof typeof TIER_ENTRY_FEES]);
       }
@@ -218,6 +225,16 @@ function GameScreen() {
 
     loadOwnedRods();
   }, [wallet.address, wallet.provider]);
+
+  useEffect(() => {
+    if (eligibleRods.length === 0) {
+      if (selectedRodId !== 0) setSelectedRodId(0);
+      return;
+    }
+    if (!eligibleRods.some(r => r.tokenId === selectedRodId)) {
+      setSelectedRodId(eligibleRods[0]!.tokenId);
+    }
+  }, [eligibleRods, selectedRodId]);
 
   // Listen for contract events
   useEffect(() => {
@@ -454,11 +471,14 @@ function GameScreen() {
       {/* 鱼竿选择 */}
       {phase === "waiting_cast" && (
         <RodSelectionPanel
-          rods={usableRods}
+          rods={eligibleRods}
           selectedRodId={selectedRodId}
           canStartFishing={canStartFishing}
           isDemoFishing={isDemoFishing}
           hasWalletRods={ownedRods.length > 0}
+          totalUsableRods={usableRods.length}
+          roomTier={roomTier}
+          requiredRodLevel={requiredRodLevel}
           onSelect={setSelectedRodId}
           onStart={handleCast}
         />
@@ -686,12 +706,15 @@ function BuffArea({ buffs }: { buffs: string[] }) {
   );
 }
 
-function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing, hasWalletRods, onSelect, onStart }: {
+function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing, hasWalletRods, totalUsableRods, roomTier, requiredRodLevel, onSelect, onStart }: {
   rods: RodData[];
   selectedRodId: number;
   canStartFishing: boolean;
   isDemoFishing: boolean;
   hasWalletRods: boolean;
+  totalUsableRods: number;
+  roomTier: RoomTier;
+  requiredRodLevel: number;
   onSelect: (tokenId: number) => void;
   onStart: () => void;
 }) {
@@ -729,6 +752,11 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             <div style={{ fontSize: "14px", color: "var(--brown-light)" }}>
               先选一把鱼竿，再点击开始钓鱼
             </div>
+            <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
+              {requiredRodLevel <= 0
+                ? `本房间（${roomTier}）需要至少一把可用鱼竿`
+                : `本房间（${roomTier}）仅展示 Lv.${requiredRodLevel}+ 的可用鱼竿`}
+            </div>
           </div>
           <div style={{ fontSize: "30px" }}>🎣</div>
         </div>
@@ -743,7 +771,11 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
               fontSize: "14px",
               lineHeight: 1.7,
             }}>
-              当前没有可用鱼竿。下面会给你一组 demo 鱼竿，方便先体验钓鱼流程。
+              {totalUsableRods > 0
+                ? requiredRodLevel <= 0
+                  ? "当前没有可用鱼竿。"
+                  : `当前没有符合等级要求（Lv.${requiredRodLevel}+）的可用鱼竿。`
+                : "当前没有可用鱼竿。下面会给你一组 demo 鱼竿，方便先体验钓鱼流程。"}
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "14px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>

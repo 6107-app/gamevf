@@ -5,8 +5,9 @@ import AnnouncementBar from "@/components/ui/AnnouncementBar";
 import RoomCard from "@/components/lobby/RoomCard";
 import { useState, useEffect, useCallback } from "react";
 import { useContract } from "@/lib/ethereum";
-import { FISHING_GAME_ADDRESS, TIER_NAMES } from "@/lib/contract";
+import { FISHING_GAME_ADDRESS, TIER_NAMES, requiredRodLevelForTier, type RoomTier as ContractRoomTier } from "@/lib/contract";
 import { ROD_TYPES } from "@/lib/rod";
+import { fetchRodsForOwner } from "@/lib/fishingRod";
 import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
@@ -115,7 +116,7 @@ export default function Home() {
   }, [isContractReady, getReadContract, fetchRooms]);
 
   // Join room handler
-  const handleJoin = async (roomId: number, entryFee: string) => {
+  const handleJoin = async (roomId: number, tierName: string, entryFee: string) => {
     if (!isContractReady) {
       alert(`加入房间 ${roomId}`);
       return;
@@ -124,6 +125,20 @@ export default function Home() {
     if (!contract) return;
 
     try {
+      const requiredLevel = requiredRodLevelForTier(tierName as ContractRoomTier);
+      const provider = wallet.provider ?? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545");
+      if (wallet.address) {
+        const rods = await fetchRodsForOwner(wallet.address, provider, 200);
+        const eligible = rods.filter(r => r.level >= requiredLevel);
+        if (eligible.length === 0) {
+          if (requiredLevel <= 0) {
+            alert("需要至少一把鱼竿才能加入房间。");
+          } else {
+            alert(`鱼竿等级不足！加入 ${tierName} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+          }
+          return;
+        }
+      }
       const tx = await contract.joinRoom(roomId, {
         value: ethers.parseEther(entryFee),
       });
@@ -131,6 +146,7 @@ export default function Home() {
       router.push(`/waiting-room?roomId=${roomId}`);
     } catch (e: unknown) {
       const selector = ethers.id("AlreadyInRoom()").slice(0, 10).toLowerCase();
+      const insufficientRodSelector = ethers.id("InsufficientRodLevel()").slice(0, 10).toLowerCase();
       const anyErr = e as any;
       const revertData =
         (typeof anyErr?.data === "string" && anyErr.data) ||
@@ -141,6 +157,16 @@ export default function Home() {
 
       if (revertData && revertData.toLowerCase().startsWith(selector)) {
         router.push(`/waiting-room?roomId=${roomId}`);
+        return;
+      }
+
+      if (revertData && revertData.toLowerCase().startsWith(insufficientRodSelector)) {
+        const requiredLevel = requiredRodLevelForTier(tierName as ContractRoomTier);
+        if (requiredLevel <= 0) {
+          alert("需要至少一把鱼竿才能加入房间。");
+        } else {
+          alert(`鱼竿等级不足！加入 ${tierName} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+        }
         return;
       }
 
@@ -248,7 +274,7 @@ export default function Home() {
                 </div>
               ) : filtered.map(room => (
                 <RoomCard key={room.roomId} {...room}
-                  onJoin={() => handleJoin(room.roomId, room.entryFee)}
+                  onJoin={() => handleJoin(room.roomId, room.tier, room.entryFee)}
                   onWatch={() => router.push(`/spectator/${room.roomId}`)}
                 />
               ))}

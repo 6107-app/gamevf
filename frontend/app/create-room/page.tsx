@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import { useContract } from "@/lib/ethereum";
-import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES } from "@/lib/contract";
+import { FISHING_GAME_ADDRESS, TIER_ENTRY_FEES, requiredRodLevelForTier } from "@/lib/contract";
+import { fetchRodsForOwner } from "@/lib/fishingRod";
 import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
@@ -64,6 +65,21 @@ export default function CreateRoom() {
     }
 
     try {
+      const requiredLevel = requiredRodLevelForTier(selectedTier);
+      const provider = wallet.provider ?? new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545");
+      if (wallet.address) {
+        const rods = await fetchRodsForOwner(wallet.address, provider, 200);
+        const eligible = rods.filter(r => r.level >= requiredLevel);
+        if (eligible.length === 0) {
+          if (requiredLevel <= 0) {
+            setError("需要至少一把鱼竿才能创建房间。");
+          } else {
+            setError(`鱼竿等级不足：创建 ${selectedTier} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+          }
+          setLoading(false);
+          return;
+        }
+      }
       const tierIndex = TIER_INDEX[selectedTier];
       const entryFee = TIER_ENTRY_FEES[selectedTier];
       const tx = await contract.createRoom(tierIndex, isPublic, isLivestream, {

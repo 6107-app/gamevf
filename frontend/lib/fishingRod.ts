@@ -364,3 +364,45 @@ export function watchUpgradeResolved(signerOrProvider: ethers.Signer | ethers.Pr
     try { c.off('UpgradeResolved', handler); } catch (e) {}
   };
 }
+
+// --- Room Tier Requirements ---
+// Map tier name to required rod level
+const TIER_REQUIRED_LEVELS: Record<string, number> = {
+  "Bronze": 0,   // Any level
+  "Silver": 1,   // Level 1+
+  "Gold": 2,     // Level 2+
+  "Diamond": 3,  // Level 3+
+};
+
+export async function getMaxRodLevel(owner: string, provider: ethers.Provider, maxToken = 200): Promise<number> {
+  const c = getFishingRodContract(provider);
+  let maxLevel = -1;
+
+  try {
+    for (let tokenId = 1; tokenId <= maxToken; tokenId++) {
+      try {
+        const ownerAddr = await c.ownerOf(tokenId);
+        if (ownerAddr.toLowerCase() === owner.toLowerCase()) {
+          const rod = await c.getRod(tokenId);
+          const level = Number(rod[2] || 0); // rod.level is at index 2
+          if (level > maxLevel) {
+            maxLevel = level;
+          }
+        }
+      } catch {
+        // Token doesn't exist, continue
+        continue;
+      }
+    }
+  } catch (e) {
+    // Ignore errors and return what we found
+  }
+
+  return maxLevel;
+}
+
+export async function hasRodForTier(owner: string, tierName: string, provider: ethers.Provider, maxToken = 200): Promise<boolean> {
+  const requiredLevel = TIER_REQUIRED_LEVELS[tierName] ?? 0;
+  const maxLevel = await getMaxRodLevel(owner, provider, maxToken);
+  return maxLevel >= requiredLevel;
+}
