@@ -1,6 +1,4 @@
 import { ethers } from "ethers";
-import { config } from "dotenv";
-config({ path: ".env.local" }); 
 
 const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
 const WS_URL = process.env.WS_URL;
@@ -11,7 +9,7 @@ const ROD_ADDRESS = process.env.NEXT_PUBLIC_ROD_ADDRESS;
 
 const GAME_ABI = [
   "event CastRequested(uint256 indexed roomId, address player, uint256 requestId)",
-  "event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber)",
+  "event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber, uint256 requestId)",
   "function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external",
 ];
 
@@ -147,29 +145,11 @@ game.on("CastRequested", async (roomId, player, requestId) => {
 });
 
 // 监听 RecastStarted（重投）
-game.on("RecastStarted", async (roomId, player, recastNumber) => {
+game.on("RecastStarted", async (roomId, player, recastNumber, requestId) => {
   console.log(`\n🎲 检测到重投！`);
   console.log(`   房间: ${roomId}  玩家: ${player}  第${recastNumber}次重投`);
 
   try {
-    const filter = game.filters.CastRequested();
-    const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - 200);
-    const logs = await game.queryFilter(filter, fromBlock, "latest");
-    if (logs.length === 0) {
-      console.error("   ❌ 找不到对应的 CastRequested 事件");
-      return;
-    }
-    const candidates = logs.filter((l) => {
-      const args = l.args;
-      if (!args) return false;
-      const rid = args[0];
-      const p = args[1];
-      return rid === roomId && typeof p === "string" && p.toLowerCase() === player.toLowerCase();
-    });
-    const latest = (candidates.length > 0 ? candidates : logs)[(candidates.length > 0 ? candidates : logs).length - 1];
-    const requestId = latest.args[2];
-
     console.log(`   RequestId: ${requestId}`);
     console.log(`   触发 VRF 回调...`);
     const txHash = await fulfill(requestId);

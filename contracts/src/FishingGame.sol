@@ -51,6 +51,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         uint256 totalBet;
         uint256 skillModifier;
         uint256 rodTokenId;
+        uint256 fishHookedAt;
+        uint256 recastBaselineScore;
+        bool needsReel;
         uint16 rodSpeedBps;
         uint16 rodWeightBps;
         uint16 rodLuckBps;
@@ -123,6 +126,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     error NotEnoughPlayers();
     error NotInRoom();
     error NotFishing();
+    error FishNotReeled();
     error MaxRecastReached();
     error NoFishCaught();
     error GameNotTimedOut();
@@ -136,9 +140,10 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
     event PlayerJoined(uint256 indexed roomId, address indexed player, uint256 playerIndex);
     event GameStarted(uint256 indexed roomId, uint256 timestamp);
     event CastRequested(uint256 indexed roomId, address player, uint256 requestId);
+    event FishHooked(uint256 indexed roomId, address player, uint8 rarity, uint256 weight, uint256 timestamp);
     event FishCaught(uint256 indexed roomId, address player, uint8 rarity, uint256 weight, uint256 score, uint256 timestamp);
     event PlayerLockedIn(uint256 indexed roomId, address player, uint256 finalScore);
-    event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber);
+    event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber, uint256 requestId);
     event DiceRolled(uint256 indexed roomId, address player, int256 diceModifier);
     event GameSettled(uint256 indexed roomId, address[3] winners, uint256[3] prizes, uint256[4] finalScores);
     event RodUsed(uint256 indexed roomId, address indexed player, uint256 indexed tokenId, uint16 speedBps, uint16 weightBps, uint16 luckBps, uint16 stabilityBps);
@@ -202,6 +207,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             totalBet: msg.value,
             skillModifier: 10000,
             rodTokenId: 0,
+            fishHookedAt: 0,
+            recastBaselineScore: 0,
+            needsReel: false,
             rodSpeedBps: 0,
             rodWeightBps: 0,
             rodLuckBps: 0,
@@ -237,6 +245,9 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             totalBet: msg.value,
             skillModifier: 10000,
             rodTokenId: 0,
+            fishHookedAt: 0,
+            recastBaselineScore: 0,
+            needsReel: false,
             rodSpeedBps: 0,
             rodWeightBps: 0,
             rodLuckBps: 0,
@@ -281,7 +292,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         );
 
         vrfRequests[requestId] = VRFRequest(roomId, idx, false);
-        _consumeEquippedRod(player.rodTokenId, 8);
+        _consumeEquippedRod(player.rodTokenId, 1);
         emit CastRequested(roomId, msg.sender, requestId);
     }
 
@@ -291,6 +302,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         uint256 idx = room.playerIndex[msg.sender];
         Player storage player = room.playerData[idx];
         if (player.status != PlayerStatus.Fishing) revert NotFishing();
+        if (player.needsReel) revert FishNotReeled();
         if (player.currentFish.weight == 0) revert NoFishCaught();
 
         player.currentFish.score = _calculateScore(player);
@@ -310,9 +322,11 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         uint256 idx = room.playerIndex[msg.sender];
         Player storage player = room.playerData[idx];
         if (player.status != PlayerStatus.Fishing) revert NotFishing();
+        if (player.needsReel) revert FishNotReeled();
         if (player.recastCount >= MAX_RECAST) revert MaxRecastReached();
         if (msg.value != room.recastFee) revert IncorrectFee();
 
+        player.recastBaselineScore = player.currentFish.score;
         _syncRodSnapshot(roomId, player, msg.sender, rodTokenId);
 
         player.recastCount++;
@@ -331,8 +345,42 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         );
 
         vrfRequests[requestId] = VRFRequest(roomId, idx, true);
-        _consumeEquippedRod(player.rodTokenId, 12);
-        emit RecastStarted(roomId, msg.sender, player.recastCount);
+        _consumeEquippedRod(player.rodTokenId, 1);
+        emit RecastStarted(roomId, msg.sender, player.recastCount, requestId);
+    }
+
+    function reel(uint256 roomId) external nonReentrant {
+        Room storage room = rooms[roomId];
+        if (!room.isPlayer[msg.sender]) revert NotInRoom();
+        uint256 idx = room.playerIndex[msg.sender];
+        Player storage player = room.playerData[idx];
+        if (player.status != PlayerStatus.Fishing) revert NotFishing();
+        if (!player.needsReel) revert FishNotReeled();
+        if (player.currentFish.weight == 0) revert NoFishCaught();
+
+        uint256 elapsed = block.timestamp - player.fishHookedAt;
+        player.currentFish.fishingTime = elapsed;
+        player.currentFish.score = _calculateScore(player);
+
+        if (player.recastBaselineScore > 0) {
+            uint256 floorBps = RECAST_FLOOR_BPS + uint256(player.rodStabilityBps) / 2;
+            if (floorBps > 9500) floorBps = 9500;
+            uint256 floor = (player.recastBaselineScore * floorBps) / 10000;
+            if (player.currentFish.score < floor) {
+                player.currentFish.score = floor;
+            }
+            player.recastBaselineScore = 0;
+        }
+
+        player.needsReel = false;
+
+        emit FishCaught(
+            roomId, msg.sender,
+            uint8(player.currentFish.rarity),
+            player.currentFish.weight,
+            player.currentFish.score,
+            block.timestamp
+        );
     }
 
     // ─── VRF Callback ───────────────────────────────────
@@ -342,7 +390,6 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         Room storage room = rooms[req.roomId];
         Player storage player = room.playerData[req.playerIndex];
 
-        uint256 previousScore = player.currentFish.score;
         uint256 effectiveSkillModifier = _effectiveSkillModifier(player.skillModifier, player.rodLuckBps);
 
         uint8 rarityRoll = uint8(randomWords[0] % 100);
@@ -365,6 +412,8 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             fishingTime: timeVariation,
             score: 0
         });
+        player.fishHookedAt = block.timestamp;
+        player.needsReel = true;
 
         if (req.isRecast && randomWords.length >= 5) {
             int256 diceModifier = _rollDice(randomWords[3], randomWords[4], player.recastCount);
@@ -377,24 +426,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
             emit DiceRolled(req.roomId, player.addr, diceModifier);
         }
 
-        player.currentFish.score = _calculateScore(player);
-
-        // Recast floor: new score must be >= 70% of previous score
-        if (req.isRecast && previousScore > 0) {
-            uint256 floorBps = RECAST_FLOOR_BPS + uint256(player.rodStabilityBps) / 2;
-            if (floorBps > 9500) floorBps = 9500;
-            uint256 floor = (previousScore * floorBps) / 10000;
-            if (player.currentFish.score < floor) {
-                player.currentFish.score = floor;
-            }
-        }
-
-        emit FishCaught(
-            req.roomId, player.addr,
-            uint8(rarity), baseWeight,
-            player.currentFish.score,
-            block.timestamp
-        );
+        emit FishHooked(req.roomId, player.addr, uint8(rarity), baseWeight, block.timestamp);
     }
 
     // ─── Scoring ────────────────────────────────────────
@@ -468,7 +500,20 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
         for (uint256 i = 0; i < room.playerCount; i++) {
             Player storage player = room.playerData[i];
             if (player.status == PlayerStatus.Fishing) {
-                if (player.currentFish.weight > 0) {
+                if (player.needsReel && player.currentFish.weight > 0) {
+                    player.currentFish.fishingTime = block.timestamp - player.fishHookedAt;
+                    player.currentFish.score = _calculateScore(player);
+                    if (player.recastBaselineScore > 0) {
+                        uint256 floorBps = RECAST_FLOOR_BPS + uint256(player.rodStabilityBps) / 2;
+                        if (floorBps > 9500) floorBps = 9500;
+                        uint256 floor = (player.recastBaselineScore * floorBps) / 10000;
+                        if (player.currentFish.score < floor) {
+                            player.currentFish.score = floor;
+                        }
+                        player.recastBaselineScore = 0;
+                    }
+                    player.needsReel = false;
+                } else if (player.currentFish.weight > 0) {
                     player.currentFish.score = _calculateScore(player);
                 }
                 player.status = PlayerStatus.LockedIn;

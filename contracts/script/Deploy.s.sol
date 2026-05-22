@@ -25,6 +25,7 @@ contract Deploy is Script {
         );
 
         game.setRodContract(address(rod));
+        rod.setGameContract(address(game));
 
         // ===== 正确生成 JSON =====
 

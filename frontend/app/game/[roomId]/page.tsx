@@ -10,6 +10,7 @@ import { type RodData, ROD_TYPES, generateMockRods } from "@/lib/rod";
 // ── 游戏状态枚举 ─────────────────────────────────────────
 type GamePhase =
   | "waiting_cast"   // 等待抛竿
+  | "casting"        // 抛竿动画
   | "waiting_vrf"    // 等待VRF回调
   | "reeling"        // 收竿Bar
   | "fish_result"    // 鱼结果展示
@@ -83,6 +84,17 @@ function randomFish(): FishResult {
   return { name, rarity, weight, score, emoji: db.emoji };
 }
 
+function applyReelResult(fish: FishResult, result: "perfect" | "good" | "ok" | "miss"): FishResult {
+  const multiplier = result === "perfect" ? 1.15
+    : result === "good" ? 1.06
+    : result === "ok" ? 1.0
+    : 0.86;
+  return {
+    ...fish,
+    score: Math.max(1, Math.round(fish.score * multiplier)),
+  };
+}
+
 function contractStatusToDisplay(status: number): OtherPlayer["status"] {
   // PLAYER_STATUS = ["Fishing", "LockedIn", "Recast"]
   switch (status) {
@@ -122,11 +134,13 @@ function GameScreen() {
   const [timeLeft, setTimeLeft] = useState(180);
   const [buffs, setBuffs] = useState<string[]>([]);
   const [diceResult, setDiceResult] = useState<{ text: string; isBuff: boolean } | null>(null);
+  const [pendingFish, setPendingFish] = useState<FishResult | null>(null);
   const [others, setOthers] = useState<OtherPlayer[]>(MOCK_OTHERS);
   const [recastFee, setRecastFee] = useState("0.01");
   const [roomTier, setRoomTier] = useState<RoomTier>("Bronze");
   const [requiredRodLevel, setRequiredRodLevel] = useState<number>(0);
   const [txPending, setTxPending] = useState(false);
+  const [recastPickerOpen, setRecastPickerOpen] = useState(false);
   const [ownedRods, setOwnedRods] = useState<RodData[]>([]);
   const [selectedRodId, setSelectedRodId] = useState<number>(0);
   const [rodSource, setRodSource] = useState<"wallet" | "demo">("demo");
@@ -138,6 +152,48 @@ function GameScreen() {
   const selectedRod = eligibleRods.find(rod => rod.tokenId === selectedRodId) ?? null;
   const isDemoFishing = rodSource === "demo";
   const canStartFishing = selectedRod !== null || (isDemoFishing && usableRods.length > 0);
+  const pendingFishRef = useRef<FishResult | null>(null);
+
+  const refreshOwnedRods = useCallback(async () => {
+    if (!wallet.address) {
+      setOwnedRods([]);
+      setRodSource("demo");
+      const mockRods = generateMockRods();
+      setSelectedRodId(mockRods[0]?.tokenId ?? 1);
+      return;
+    }
+
+    try {
+      const provider = wallet.provider
+        ? wallet.provider
+        : new ethers.JsonRpcProvider(
+            process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545"
+          );
+      const rods = await fetchRodsForOwner(wallet.address, provider, 200);
+      setOwnedRods(rods);
+      const usable = rods.filter(rod => rod.durability > 0);
+
+      if (usable.length > 0) {
+        setRodSource("wallet");
+        setSelectedRodId(prev => {
+          if (prev && usable.some(rod => rod.tokenId === prev)) return prev;
+          return usable[0]!.tokenId;
+        });
+      } else {
+        setRodSource("demo");
+        const mockRods = generateMockRods();
+        setSelectedRodId(mockRods[0]?.tokenId ?? 1);
+      }
+    } catch {
+      setRodSource("demo");
+      const mockRods = generateMockRods();
+      setSelectedRodId(mockRods[0]?.tokenId ?? 1);
+    }
+  }, [wallet.address, wallet.provider]);
+
+  useEffect(() => {
+    pendingFishRef.current = pendingFish;
+  }, [pendingFish]);
   
 
   // Fetch room data from contract (pot, recast fee, other players)
@@ -196,46 +252,8 @@ function GameScreen() {
 
   // 找到 useEffect for loadOwnedRods，在 setRodSource("demo") 的地方统一处理
   useEffect(() => {
-    const loadOwnedRods = async () => {
-      if (!wallet.address) {
-        setOwnedRods([]);
-        setRodSource("demo");
-        const mockRods = generateMockRods();
-        setSelectedRodId(mockRods[0]?.tokenId ?? 1); // ← 确保有默认值
-        return;
-      }
-
-      try {
-        const provider = wallet.provider
-          ? wallet.provider
-          : new ethers.JsonRpcProvider(
-              process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545"
-            );
-        const rods = await fetchRodsForOwner(wallet.address, provider, 200);
-        setOwnedRods(rods);
-        const usable = rods.filter(rod => rod.durability > 0);
-
-        if (usable.length > 0) {
-          setRodSource("wallet");
-          setSelectedRodId(prev => {
-            if (prev && usable.some(rod => rod.tokenId === prev)) return prev;
-            return usable[0]!.tokenId;
-          });
-        } else {
-          // 钱包里没有可用鱼竿，fallback demo
-          setRodSource("demo");
-          const mockRods = generateMockRods();
-          setSelectedRodId(mockRods[0]?.tokenId ?? 1);
-        }
-      } catch {
-        setRodSource("demo");
-        const mockRods = generateMockRods();
-        setSelectedRodId(mockRods[0]?.tokenId ?? 1);
-      }
-    };
-
-    loadOwnedRods();
-  }, [wallet.address, wallet.provider]);
+    refreshOwnedRods();
+  }, [refreshOwnedRods]);
 
   useEffect(() => {
     if (eligibleRods.length === 0) {
@@ -247,6 +265,12 @@ function GameScreen() {
     }
   }, [eligibleRods, selectedRodId]);
 
+  useEffect(() => {
+    if (phase !== "decision") {
+      setRecastPickerOpen(false);
+    }
+  }, [phase]);
+
   // Listen for contract events
   useEffect(() => {
     if (!isContractReady || !roomId) return;
@@ -255,13 +279,35 @@ function GameScreen() {
 
     const roomIdNum = Number(roomId);
 
-    const onFishCaught = (eventRoomId: bigint, _player: string, rarity: number, weight: bigint, score: bigint) => {
+    const onFishHooked = (eventRoomId: bigint, _player: string, rarity: number, weight: bigint) => {
       if (Number(eventRoomId) !== roomIdNum) return;
       if (_player.toLowerCase() === wallet.address!.toLowerCase()) {
         const rarityName = RARITY_NAMES[rarity] as Rarity;
         const db = FISH_DB[rarityName] || FISH_DB.Common;
         const fishName = db.names[Math.floor(Math.random() * db.names.length)];
         const w = Number(weight) / 10; // assuming weight is stored as x10
+        setPendingFish({
+          name: fishName,
+          rarity: rarityName,
+          weight: w,
+          score: Math.max(1, Math.round(w * { Common:10, Rare:25, SuperRare:60, Epic:120, Legendary:300 }[rarityName])),
+          emoji: db.emoji,
+        });
+        if (phase !== "dice_roll") {
+          setPhase("reeling");
+        }
+      } else {
+        fetchGameData();
+      }
+    };
+
+    const onFishCaught = (eventRoomId: bigint, _player: string, rarity: number, weight: bigint, score: bigint) => {
+      if (Number(eventRoomId) !== roomIdNum) return;
+      if (_player.toLowerCase() === wallet.address!.toLowerCase()) {
+        const rarityName = RARITY_NAMES[rarity] as Rarity;
+        const db = FISH_DB[rarityName] || FISH_DB.Common;
+        const fishName = db.names[Math.floor(Math.random() * db.names.length)];
+        const w = Number(weight) / 10;
         setFish({
           name: fishName,
           rarity: rarityName,
@@ -269,6 +315,7 @@ function GameScreen() {
           score: Number(score),
           emoji: db.emoji,
         });
+        setPendingFish(null);
         setPhase("fish_result");
         setTimeout(() => setPhase("decision"), 1200);
       } else {
@@ -295,7 +342,7 @@ function GameScreen() {
         setCastCount(c => c + 1);
         setTimeout(() => {
           setDiceResult(null);
-          setPhase("waiting_cast");
+          setPhase(pendingFishRef.current ? "reeling" : "waiting_cast");
         }, 2500);
       }
     };
@@ -306,18 +353,20 @@ function GameScreen() {
       }
     };
 
+    contract.on("FishHooked", onFishHooked);
     contract.on("FishCaught", onFishCaught);
     contract.on("PlayerLockedIn", onPlayerLockedIn);
     contract.on("DiceRolled", onDiceRolled);
     contract.on("GameSettled", onGameSettled);
 
     return () => {
+      contract.off("FishHooked", onFishHooked);
       contract.off("FishCaught", onFishCaught);
       contract.off("PlayerLockedIn", onPlayerLockedIn);
       contract.off("DiceRolled", onDiceRolled);
       contract.off("GameSettled", onGameSettled);
     };
-  }, [isContractReady, roomId, getReadContract, wallet.address, fetchGameData, router]);
+  }, [isContractReady, roomId, getReadContract, wallet.address, fetchGameData, router, phase]);
 
   // 倒计时
   useEffect(() => {
@@ -330,16 +379,19 @@ function GameScreen() {
   const handleCast = useCallback(async () => {
     if (phase !== "waiting_cast" || txPending) return;
 
+    if (!isDemoFishing && !canStartFishing) {
+      alert("请先选择一把可用的鱼竿。");
+      return;
+    }
+
+    // 先给一个短暂的抛竿动画，再进入下一步流程
+    setPhase("casting");
+    await new Promise((resolve) => setTimeout(resolve, 650));
+
     // demo 模式或合约地址未配置：直接走 mock 流程，不需要鱼竿检查
     if (!isContractReady || !roomId || isDemoFishing) {
       setPhase("waiting_vrf");
       setTimeout(() => setPhase("reeling"), 1500);
-      return;
-    }
-
-    // 合约模式：必须有真实鱼竿
-    if (!canStartFishing) {
-      alert("请先选择一把可用的鱼竿。");
       return;
     }
 
@@ -353,6 +405,7 @@ function GameScreen() {
     try {
       const tx = await contract.cast(Number(roomId), rodIdToPass);
       await tx.wait();
+        await refreshOwnedRods();
       setTimeout(() => {
         setPhase(prev => (prev === "waiting_vrf" ? "reeling" : prev));
       }, 5000);
@@ -363,11 +416,37 @@ function GameScreen() {
     } finally {
       setTxPending(false);
     }
-  }, [phase, txPending, isContractReady, roomId, getWriteContract,
-      selectedRodId, canStartFishing, isDemoFishing, rodSource]);
+    }, [phase, txPending, isContractReady, roomId, getWriteContract,
+      selectedRodId, canStartFishing, isDemoFishing, rodSource, refreshOwnedRods]);
 
   // 收竿结果 (mock fallback for when contract events handle it)
-  const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
+  const handleReel = useCallback(async (result: "perfect" | "good" | "ok" | "miss") => {
+    if (pendingFish) {
+      if (!isContractReady || !roomId) {
+        const finalFish = applyReelResult(pendingFish, result);
+        setFish(finalFish);
+        setPendingFish(null);
+        setPhase("fish_result");
+        setTimeout(() => setPhase("decision"), 1200);
+        return;
+      }
+
+      const contract = getWriteContract();
+      if (!contract) return;
+
+      setTxPending(true);
+      try {
+        const tx = await contract.reel(Number(roomId));
+        await tx.wait();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "收竿失败";
+        alert(msg);
+      } finally {
+        setTxPending(false);
+      }
+      return;
+    }
+
     if (result === "miss") {
       setPhase("waiting_cast");
       return;
@@ -387,7 +466,7 @@ function GameScreen() {
       setPhase("fish_result");
       setTimeout(() => setPhase("decision"), 1200);
     }
-  }, [isContractReady]);
+  }, [isContractReady, pendingFish]);
 
   // 锁定
   const handleLockIn = async () => {
@@ -415,6 +494,17 @@ function GameScreen() {
   };
 
   // 重投
+  const handleOpenRecastPicker = useCallback(() => {
+    if (castCount >= 3) return;
+
+    if (!canStartFishing) {
+      alert("请先选择一把可用的鱼竿。");
+      return;
+    }
+
+    setRecastPickerOpen(true);
+  }, [castCount, canStartFishing]);
+
   const handleRecast = useCallback(async () => {
     if (castCount >= 3) return;
 
@@ -432,20 +522,24 @@ function GameScreen() {
     if (!contract) return;
 
     setTxPending(true);
+    setRecastPickerOpen(false);
+    setDiceResult(null);
     try {
       const tx = await contract.recast(Number(roomId), selectedRodId || 0, {
         value: ethers.parseEther(recastFee),
       });
-      await tx.wait();
       setPhase("dice_roll");
+      await tx.wait();
+        await refreshOwnedRods();
       // DiceRolled event will update the dice result
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "重投失败";
       alert(msg);
+      setPhase("decision");
     } finally {
       setTxPending(false);
     }
-  }, [castCount, isContractReady, roomId, getWriteContract, recastFee, selectedRodId, canStartFishing, isDemoFishing]);
+  }, [castCount, isContractReady, roomId, getWriteContract, recastFee, selectedRodId, canStartFishing, isDemoFishing, refreshOwnedRods]);
 
   // 骰子结果 (mock fallback)
   const handleDiceFinish = (buff: { text: string; isBuff: boolean }) => {
@@ -495,6 +589,28 @@ function GameScreen() {
           requiredRodLevel={requiredRodLevel}
           onSelect={setSelectedRodId}
           onStart={handleCast}
+          title="我的鱼竿"
+          subtitle="先选一把鱼竿，再点击开始钓鱼"
+          startLabel="开始钓鱼"
+        />
+      )}
+
+      {recastPickerOpen && phase === "decision" && (
+        <RodSelectionPanel
+          rods={eligibleRods}
+          selectedRodId={selectedRodId}
+          canStartFishing={canStartFishing}
+          isDemoFishing={isDemoFishing}
+          hasWalletRods={ownedRods.length > 0}
+          totalUsableRods={usableRods.length}
+          roomTier={roomTier}
+          requiredRodLevel={requiredRodLevel}
+          onSelect={setSelectedRodId}
+          onStart={handleRecast}
+          onClose={() => setRecastPickerOpen(false)}
+          title="重投前换竿"
+          subtitle="先重新选择一把鱼竿，再把这次重投交给合约"
+          startLabel="确认重投"
         />
       )}
 
@@ -507,13 +623,16 @@ function GameScreen() {
         fish={fish}
         onReel={handleReel}
         onLockIn={handleLockIn}
-        onRecast={handleRecast}
+        onRecast={handleOpenRecastPicker}
         castCount={castCount}
         recastFee={recastFee}
         txPending={txPending}
       />
 
       {/* 骰子弹窗 */}
+      {phase === "casting" && (
+        <CastingUI />
+      )}
       {phase === "dice_roll" && !isContractReady && (
         <DiceModal onFinish={handleDiceFinish} recastNumber={castCount + 1} />
       )}
@@ -720,7 +839,7 @@ function BuffArea({ buffs }: { buffs: string[] }) {
   );
 }
 
-function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing, hasWalletRods, totalUsableRods, roomTier, requiredRodLevel, onSelect, onStart }: {
+function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing, hasWalletRods, totalUsableRods, roomTier, requiredRodLevel, onSelect, onStart, onClose, title = "我的鱼竿", subtitle = "先选一把鱼竿，再点击开始钓鱼", startLabel = "开始钓鱼" }: {
   rods: RodData[];
   selectedRodId: number;
   canStartFishing: boolean;
@@ -731,6 +850,10 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
   requiredRodLevel: number;
   onSelect: (tokenId: number) => void;
   onStart: () => void;
+  onClose?: () => void;
+  title?: string;
+  subtitle?: string;
+  startLabel?: string;
 }) {
   const selectedRod = rods.find(rod => rod.tokenId === selectedRodId) ?? null;
 
@@ -762,10 +885,8 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
           borderBottom: "1px solid rgba(139,99,85,0.10)",
         }}>
           <div>
-            <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--brown)", marginBottom: "6px" }}>我的鱼竿</div>
-            <div style={{ fontSize: "14px", color: "var(--brown-light)" }}>
-              先选一把鱼竿，再点击开始钓鱼
-            </div>
+            <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--brown)", marginBottom: "6px" }}>{title}</div>
+            <div style={{ fontSize: "14px", color: "var(--brown-light)" }}>{subtitle}</div>
             <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
               {requiredRodLevel <= 0
                 ? `本房间（${roomTier}）需要至少一把可用鱼竿`
@@ -907,22 +1028,38 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>
               {hasWalletRods ? "已读取钱包鱼竿" : "当前使用 demo 鱼竿数据"}
             </div>
-            // RodSelectionPanel 内，找到"开始钓鱼"按钮，替换
-            <button
-              className="btn-primary"
-              onClick={() => {
-                console.log("开始钓鱼 clicked, canStartFishing:", canStartFishing);
-                onStart();          // 这会调用 handleCast
-              }}
-              disabled={!canStartFishing}
-              style={{
-                minWidth: "160px",
-                opacity: canStartFishing ? 1 : 0.5,
-                cursor: canStartFishing ? "pointer" : "not-allowed",
-              }}
-            >
-              开始钓鱼
-            </button>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    style={{
+                      minWidth: "120px",
+                      padding: "14px 20px",
+                      fontSize: "14px",
+                      borderRadius: "16px",
+                      border: "1px solid rgba(139,99,85,0.18)",
+                      background: "rgba(255,255,255,0.92)",
+                      color: "var(--brown)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    返回决策
+                  </button>
+                )}
+                <button
+                  className="btn-primary"
+                  onClick={onStart}
+                  disabled={!canStartFishing}
+                  style={{
+                    minWidth: "160px",
+                    opacity: canStartFishing ? 1 : 0.5,
+                    cursor: canStartFishing ? "pointer" : "not-allowed",
+                  }}
+                >
+                  {startLabel}
+                </button>
+              </div>
           </div>
         </div>
       </div>
@@ -1056,6 +1193,61 @@ function WaitingVRFUI() {
         }}>
           <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>🐠</span>
           鱼儿们在考虑中...
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 抛竿动画 ─────────────────────────────────────────────
+function CastingUI() {
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div style={{
+        position: "relative",
+        width: "260px",
+        height: "120px",
+        margin: "0 auto 18px",
+      }}>
+        <div style={{
+          position: "absolute",
+          left: "50%",
+          top: "14px",
+          transform: "translateX(-50%) rotate(-18deg)",
+          fontSize: "48px",
+          animation: "bounce-in 0.35s ease forwards",
+        }}>🎣</div>
+        <div style={{
+          position: "absolute",
+          left: "50%",
+          top: "64px",
+          width: "2px",
+          height: "42px",
+          background: "rgba(255,255,255,0.75)",
+          transform: "translateX(-50%)",
+          animation: "float 0.8s ease-in-out infinite",
+        }} />
+      </div>
+      <div style={{
+        background: "rgba(255,255,255,0.88)",
+        borderRadius: "20px",
+        padding: "16px 26px",
+        backdropFilter: "blur(6px)",
+      }}>
+        <div style={{
+          fontWeight: 800,
+          fontSize: "15px",
+          color: "var(--brown)",
+        }}>
+          正在甩竿...
+        </div>
+        <div style={{
+          marginTop: "6px",
+          fontSize: "13px",
+          color: "var(--brown-light)",
+          fontWeight: 600,
+        }}>
+          准备连接钱包确认交易
         </div>
       </div>
     </div>
@@ -1309,7 +1501,7 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }
           borderRadius: "16px", minWidth: "140px",
           opacity: txPending ? 0.6 : 1,
         }}>
-          <div>{txPending ? "确认中..." : "再试一次 🎣"}</div>
+          <div>{txPending ? "确认中..." : "更换鱼竿再重投 🎣"}</div>
           <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>
             +{recastFee} ETH
           </div>

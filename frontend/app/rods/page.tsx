@@ -268,6 +268,7 @@ export default function RodsHallPage() {
                       }}
                           onClick={async () => {
                         try {
+                              const expectedChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "31337");
                           const provider = typeof window !== 'undefined' && (window as any).ethereum
                             ? new ethers.BrowserProvider((window as any).ethereum)
                             : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
@@ -279,7 +280,21 @@ export default function RodsHallPage() {
                           if (!(window as any).ethereum) return alert('请安装钱包');
                           const web3 = new ethers.BrowserProvider((window as any).ethereum);
                           await web3.send('eth_requestAccounts', []);
+                          const network = await web3.getNetwork();
+                          if (Number(network.chainId) !== expectedChainId) {
+                            await wallet.switchToLocalNetwork();
+                            alert(`当前 MetaMask 网络不是 Anvil (${expectedChainId})，请切换后再试一次`);
+                            return;
+                          }
                           const signer = await web3.getSigner();
+                          const signerAddress = await signer.getAddress();
+                          const walletBalance = await web3.getBalance(signerAddress);
+                          const rpcProvider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+                          const price = await getMintPrice(idx, rpcProvider);
+                          if (walletBalance < price) {
+                            alert(`当前钱包余额不足：${signerAddress} 余额 ${ethers.formatEther(walletBalance)} ETH，需要至少 ${ethers.formatEther(price)} ETH`);
+                            return;
+                          }
                           const tx = await mintRodOnChain(idx, signer);
                           alert('交易已发出，等待上链');
                           await tx.wait();
@@ -290,8 +305,10 @@ export default function RodsHallPage() {
                           const code = e?.code || e?.error?.code;
                           if (code === 4001) {
                             alert('用户已拒绝交易签名');
+                          } else if (code === 'INSUFFICIENT_MINT_BALANCE' || String(e?.message || '').includes('INSUFFICIENT_MINT_BALANCE') || String(e?.message || '').includes('insufficient funds')) {
+                            alert('当前钱包余额不足。请切换到 Anvil 的 funded 账户，或先向当前地址转入至少 0.01 ETH 的测试币。');
                           } else {
-                            alert('交易失败');
+                            alert(`交易失败：${e?.message || '未知错误'}`);
                           }
                         }
                       }}

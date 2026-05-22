@@ -233,6 +233,14 @@ export async function mintRodOnChain(rodType: number, signer: ethers.Signer) {
   const readProvider = new ethers.JsonRpcProvider(rpcUrl);
   const price = await getMintPrice(rodType, readProvider);
   const from = await s.getAddress();
+  const balance = await readProvider.getBalance(from);
+  if (balance < price) {
+    const error = new Error(
+      `INSUFFICIENT_MINT_BALANCE: 当前钱包余额不足，至少需要 ${ethers.formatEther(price)} ETH（未含 gas）`
+    ) as Error & { code?: string };
+    error.code = "INSUFFICIENT_MINT_BALANCE";
+    throw error;
+  }
   const nonce = await readProvider.getTransactionCount(from, "latest");
   const feeData = await readProvider.getFeeData();
   let gasLimit: bigint | undefined;
