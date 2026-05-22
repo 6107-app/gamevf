@@ -130,7 +130,21 @@ export default function Home() {
       await tx.wait();
       router.push(`/waiting-room?roomId=${roomId}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "加入失败";
+      const selector = ethers.id("AlreadyInRoom()").slice(0, 10).toLowerCase();
+      const anyErr = e as any;
+      const revertData =
+        (typeof anyErr?.data === "string" && anyErr.data) ||
+        (typeof anyErr?.error?.data === "string" && anyErr.error.data) ||
+        (typeof anyErr?.info?.error?.data === "string" && anyErr.info.error.data) ||
+        (typeof anyErr?.cause?.data === "string" && anyErr.cause.data) ||
+        null;
+
+      if (revertData && revertData.toLowerCase().startsWith(selector)) {
+        router.push(`/waiting-room?roomId=${roomId}`);
+        return;
+      }
+
+      const msg = anyErr?.shortMessage || anyErr?.message || "加入失败";
       alert(msg);
     } finally {
     }

@@ -230,6 +230,24 @@ function WaitingRoom() {
         padding: "32px",
         boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
       }}>
+        <button
+          onClick={() => router.push("/")}
+          style={{
+            position: "absolute",
+            top: "18px",
+            left: "18px",
+            background: "white",
+            border: "1px solid var(--cream-dark)",
+            borderRadius: "12px",
+            padding: "8px 12px",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: 700,
+            color: "var(--brown)",
+          }}
+        >
+          ← 返回大厅
+        </button>
 
         {/* 标题 */}
         <div style={{ textAlign: "center", marginBottom: "24px" }}>

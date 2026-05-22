@@ -3,6 +3,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" }); 
 
 const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
+const WS_URL = process.env.WS_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const VRF_ADDRESS = process.env.VRF_ADDRESS;
 const GAME_ADDRESS = process.env.GAME_ADDRESS;
@@ -43,14 +44,15 @@ requireAddress("VRF_ADDRESS", VRF_ADDRESS);
 requireAddress("GAME_ADDRESS", GAME_ADDRESS);
 if (ROD_ADDRESS) requireAddress("ROD_ADDRESS", ROD_ADDRESS);
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const provider = WS_URL ? new ethers.WebSocketProvider(WS_URL) : new ethers.JsonRpcProvider(RPC_URL);
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, provider);
-const vrf = new ethers.Contract(VRF_ADDRESS, VRF_ABI, signer);
+const vrfInterface = new ethers.Interface(VRF_ABI);
 const rod = ROD_ADDRESS ? new ethers.Contract(ROD_ADDRESS, ROD_ABI, provider) : null;
 
 console.log("🎣 AutoFulfill 监听中...");
 console.log(`RPC:      ${RPC_URL}`);
+if (WS_URL) console.log(`WS:       ${WS_URL}`);
 console.log(`Game:     ${GAME_ADDRESS}`);
 if (rod) console.log(`Rod:      ${ROD_ADDRESS}`);
 console.log(`VRF地址:  ${VRF_ADDRESS}`);
@@ -58,13 +60,27 @@ console.log("等待 CastRequested / RecastStarted / UpgradeRequested 事件...\n
 
 const inFlight = new Set();
 
+async function requireContractCode(name, address) {
+  const code = await provider.getCode(address);
+  if (!code || code === "0x") {
+    console.error(`${name} 不是合约地址（getCode=0x）：${address}`);
+    console.error("请检查是否重启过 anvil、以及环境变量是否指向当前这条链上部署出来的地址。");
+    process.exit(1);
+  }
+}
+
+await requireContractCode("VRF_ADDRESS", VRF_ADDRESS);
+await requireContractCode("GAME_ADDRESS", GAME_ADDRESS);
+if (ROD_ADDRESS) await requireContractCode("ROD_ADDRESS", ROD_ADDRESS);
+
 async function fulfill(requestId) {
   const key = requestId?.toString?.() ?? String(requestId);
   if (inFlight.has(key)) return null;
   inFlight.add(key);
   await new Promise((r) => setTimeout(r, 250));
   try {
-    const tx = await vrf.fulfill(requestId);
+    const data = vrfInterface.encodeFunctionData("fulfill", [requestId]);
+    const tx = await signer.sendTransaction({ to: VRF_ADDRESS, data });
     await tx.wait();
     return tx.hash;
   } finally {
