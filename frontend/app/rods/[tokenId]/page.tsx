@@ -9,6 +9,7 @@ import { generateMockRods, ROD_TYPES, ROD_MAX_LEVEL, ROD_USE_BEFORE_REPAIR, getU
 import { ethers } from "ethers";
 import { getFullRepairCost, getPartialRepairCost, getUpgradeFee, repairFullOnChain, repairPartialOnChain, upgradeOnChain, simulateRepairFull, simulateUpgrade, getRodOnChain, watchUpgradeResolved, getPendingUpgradeRequestId, getOwnerOf } from "@/lib/fishingRod";
 import { getFullRepairCostLocal, getUpgradeFeeLocal, ROD_CONFIG } from '@/lib/rod';
+import { useContract } from "@/lib/ethereum";
 
 const REPAIR_PLANS = [
   { restore: 10, label: "+10", ratioLabel: "15%", ratioPercent: 15 },
@@ -23,6 +24,7 @@ export default function RodDetailPage() {
   const tokenId = parseInt(params.tokenId as string);
   const allRods = generateMockRods();
   const initial = allRods.find(r => r.tokenId === tokenId) ?? null;
+  const { wallet } = useContract();
 
   const [rod, setRod] = useState<RodData | null>(initial as RodData | null);
   const [showRepairModal, setShowRepairModal] = useState(false);
@@ -33,7 +35,11 @@ export default function RodDetailPage() {
   if (!rod) {
     return (
       <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-        <Navbar />
+        <Navbar
+          walletAddress={wallet.address}
+          isConnecting={wallet.isConnecting}
+          onConnect={wallet.connect}
+        />
         <div style={{
           maxWidth: "1280px",
           margin: "0 auto",
@@ -325,7 +331,11 @@ export default function RodDetailPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      <Navbar />
+      <Navbar
+        walletAddress={wallet.address}
+        isConnecting={wallet.isConnecting}
+        onConnect={wallet.connect}
+      />
 
       <div style={{
         maxWidth: "1000px",
