@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 
 // Deploy后填入实际地址（Sepolia测试网）
 export const FISHING_GAME_ADDRESS = 
-  process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || 
+  process.env.NEXT_PUBLIC_GAME_ADDRESS || 
   "0x0000000000000000000000000000000000000000";
 
 export const FISHING_GAME_ABI = [

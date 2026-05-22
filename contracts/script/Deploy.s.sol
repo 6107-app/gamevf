@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
 import "forge-std/Script.sol";
 import "../src/FishingGame.sol";
 import "../src/FishingRod.sol";
@@ -23,12 +24,41 @@ contract Deploy is Script {
             1
         );
 
-        // 让 FishingGame 知道 FishingRod 的地址
         game.setRodContract(address(rod));
 
-        console.log("VRF:", address(vrf));
-        console.log("FishingGame:", address(game));
-        console.log("FishingRod:", address(rod));
+        // ===== 正确生成 JSON =====
+
+        string memory root = vm.projectRoot();
+
+        string memory path = string.concat(
+            root,
+            "/deployments/localhost.json"
+        );
+
+        string memory json;
+
+        json = vm.serializeAddress(
+            "deployment",
+            "GAME_ADDRESS",
+            address(game)
+        );
+
+        json = vm.serializeAddress(
+            "deployment",
+            "ROD_ADDRESS",
+            address(rod)
+        );
+
+        json = vm.serializeAddress(
+            "deployment",
+            "VRF_ADDRESS",
+            address(vrf)
+        );
+
+        vm.writeJson(json, path);
+
+        console.log("Deployment saved:");
+        console.log(path);
 
         vm.stopBroadcast();
     }

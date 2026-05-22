@@ -6,8 +6,8 @@ const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
 const WS_URL = process.env.WS_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const VRF_ADDRESS = process.env.VRF_ADDRESS;
-const GAME_ADDRESS = process.env.GAME_ADDRESS;
-const ROD_ADDRESS = process.env.ROD_ADDRESS;
+const GAME_ADDRESS = process.env.NEXT_PUBLIC_GAME_ADDRESS;
+const ROD_ADDRESS = process.env.NEXT_PUBLIC_ROD_ADDRESS;
 
 const GAME_ABI = [
   "event CastRequested(uint256 indexed roomId, address player, uint256 requestId)",
