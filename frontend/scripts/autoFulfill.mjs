@@ -1,4 +1,6 @@
 import { ethers } from "ethers";
+import { config } from "dotenv";
+config({ path: ".env.local" }); 
 
 const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
