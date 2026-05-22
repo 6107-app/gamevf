@@ -112,7 +112,7 @@ function GameScreen() {
   const params = useParams();
   const roomId = params.roomId as string;
 
-  const { wallet, getReadContract, getWriteContract } = useContract();
+  const { wallet, getReadContract, getRpcReadContract, getWriteContract } = useContract();
   const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   const [phase, setPhase] = useState<GamePhase>("waiting_cast");
@@ -222,7 +222,7 @@ function GameScreen() {
   // Listen for contract events
   useEffect(() => {
     if (!isContractReady || !roomId) return;
-    const contract = getReadContract();
+    const contract = getRpcReadContract();
     if (!contract) return;
 
     const roomIdNum = Number(roomId);

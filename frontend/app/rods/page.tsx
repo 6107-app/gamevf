@@ -4,13 +4,15 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
-import { RodData, generateMockRods, ROD_TYPES } from "@/lib/rod";
+import { RodData, ROD_TYPES } from "@/lib/rod";
 import { ethers } from "ethers";
 import { getMintPrice, mintRodOnChain, fetchRodsForOwner, simulateMint } from "@/lib/fishingRod";
+import { useContract } from "@/lib/ethereum";
 
 export default function RodsHallPage() {
   const router = useRouter();
-  const [rods, setRods] = useState<RodData[]>(generateMockRods());
+  const { wallet } = useContract();
+  const [rods, setRods] = useState<RodData[]>([]);
   const [filterType, setFilterType] = useState<"All" | keyof typeof ROD_TYPES>("All");
   const [mintPrices, setMintPrices] = useState<any[]>([]);
 
@@ -31,22 +33,23 @@ export default function RodsHallPage() {
 
   const SIMULATE = process.env.NEXT_PUBLIC_SIMULATE_TX === 'true';
 
-  // Fetch rods for a virtual address (read-only). Uses NEXT_PUBLIC_FAKE_ADDRESS or a default.
+  const loadOwnedRods = async () => {
+    if (!wallet.address) {
+      setRods([]);
+      return;
+    }
+    try {
+      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
+      const owned = await fetchRodsForOwner(wallet.address, provider, 200);
+      setRods((owned ?? []).sort((a, b) => a.tokenId - b.tokenId));
+    } catch (e) {
+      setRods([]);
+    }
+  };
+
   useEffect(() => {
-    const fetchOwned = async () => {
-      try {
-        const provider = typeof window !== 'undefined' && (window as any).ethereum
-          ? new ethers.BrowserProvider((window as any).ethereum)
-          : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
-        const fake = process.env.NEXT_PUBLIC_FAKE_ADDRESS || "0x0000000000000000000000000000000000000001";
-        const owned = await fetchRodsForOwner(fake, provider, 200);
-        if (owned && owned.length > 0) setRods(owned);
-      } catch (e) {
-        // ignore
-      }
-    };
-    fetchOwned();
-  }, []);
+    void loadOwnedRods();
+  }, [wallet.address, wallet.provider]);
 
   const filtered = rods.filter(rod => {
     if (filterType === "All") return true;
@@ -59,7 +62,11 @@ export default function RodsHallPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      <Navbar />
+      <Navbar
+        walletAddress={wallet.address}
+        isConnecting={wallet.isConnecting}
+        onConnect={wallet.connect}
+      />
 
       <div style={{
         maxWidth: "1280px",
@@ -138,7 +145,7 @@ export default function RodsHallPage() {
           }}>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>🎣</div>
             <p style={{ fontSize: "15px", marginBottom: "16px" }}>
-              暂无此类鱼竿
+              {wallet.address ? "暂无此类鱼竿" : "请先连接钱包"}
             </p>
             <button className="btn-primary" onClick={() => setFilterType("All")}>
               查看所有鱼竿
@@ -253,6 +260,7 @@ export default function RodsHallPage() {
                           alert('交易已发出，等待上链');
                           await tx.wait();
                           alert('铸造成功');
+                          await loadOwnedRods();
                         } catch (e: any) {
                           console.error(e);
                           const code = e?.code || e?.error?.code;

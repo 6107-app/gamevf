@@ -5,7 +5,7 @@ import AnnouncementBar from "@/components/ui/AnnouncementBar";
 import RoomCard from "@/components/lobby/RoomCard";
 import { useState, useEffect, useCallback } from "react";
 import { useContract } from "@/lib/ethereum";
-import { FISHING_GAME_ADDRESS, TIER_NAMES, ROOM_STATUS, TIER_ENTRY_FEES } from "@/lib/contract";
+import { FISHING_GAME_ADDRESS, TIER_NAMES } from "@/lib/contract";
 import { ROD_TYPES } from "@/lib/rod";
 import { ethers } from "ethers";
 
@@ -20,14 +20,6 @@ interface RoomData {
   playerCount: number;
   isLivestream: boolean;
 }
-
-const MOCK_ROOMS: RoomData[] = [
-  { roomId: 0, name: "芦苇湾 3号", tier: "Bronze", entryFee: "0.01", playerCount: 2, isLivestream: false },
-  { roomId: 1, name: "荷花池 1号", tier: "Silver", entryFee: "0.05", playerCount: 3, isLivestream: true },
-  { roomId: 2, name: "金鳞湖 7号", tier: "Gold", entryFee: "0.10", playerCount: 1, isLivestream: false },
-  { roomId: 3, name: "星钻湾 2号", tier: "Diamond", entryFee: "0.50", playerCount: 4, isLivestream: true },
-  { roomId: 4, name: "竹林湾 5号", tier: "Bronze", entryFee: "0.01", playerCount: 1, isLivestream: false },
-];
 
 const TIER_FILTER_COLORS: Record<FilterTier, string> = {
   "全部":    "#FF7B6B",
@@ -52,18 +44,17 @@ function generateRoomName(tier: RoomTier, roomId: number): string {
 export default function Home() {
   const [filter, setFilter] = useState<FilterTier>("全部");
   const [liveOnly, setLiveOnly] = useState(false);
-  const [rooms, setRooms] = useState<RoomData[]>(MOCK_ROOMS);
+  const [rooms, setRooms] = useState<RoomData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [joiningRoom, setJoiningRoom] = useState<number | null>(null);
   const router = useRouter();
 
-  const { wallet, getReadContract, getWriteContract } = useContract();
+  const { wallet, getReadContract, getRpcReadContract, getWriteContract } = useContract();
   const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   // Fetch rooms from contract
   const fetchRooms = useCallback(async () => {
     if (!isContractReady) {
-      setRooms(MOCK_ROOMS);
+      setRooms([]);
       return;
     }
     const contract = getReadContract();
@@ -96,9 +87,9 @@ export default function Home() {
         }
       }
 
-      setRooms(fetchedRooms.length > 0 ? fetchedRooms : MOCK_ROOMS);
+      setRooms(fetchedRooms);
     } catch {
-      setRooms(MOCK_ROOMS);
+      setRooms([]);
     } finally {
       setLoading(false);
     }
@@ -111,7 +102,7 @@ export default function Home() {
   // Listen for RoomCreated events to refresh
   useEffect(() => {
     if (!isContractReady) return;
-    const contract = getReadContract();
+    const contract = getRpcReadContract();
     if (!contract) return;
 
     const onRoomCreated = () => {
@@ -132,7 +123,6 @@ export default function Home() {
     const contract = getWriteContract();
     if (!contract) return;
 
-    setJoiningRoom(roomId);
     try {
       const tx = await contract.joinRoom(roomId, {
         value: ethers.parseEther(entryFee),
@@ -143,7 +133,6 @@ export default function Home() {
       const msg = e instanceof Error ? e.message : "加入失败";
       alert(msg);
     } finally {
-      setJoiningRoom(null);
     }
   };
 

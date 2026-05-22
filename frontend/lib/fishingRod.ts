@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { ROD_CONFIG, UPGRADE_FEES_ETH, getUpgradeFeeLocal, sampleUpgradeResult, type RodData } from "./rod";
 
 export const FISHING_ROD_ADDRESS = process.env.NEXT_PUBLIC_FISHING_ROD_ADDRESS || "0x0000000000000000000000000000000000000000";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export const FISHING_ROD_ABI = [
   "function mintRod(uint8 rodType) payable returns (uint256)",
@@ -22,6 +23,7 @@ export const FISHING_ROD_ABI_EXTENDED = [
   ...FISHING_ROD_ABI,
   "function pendingUpgradeRequestId(uint256 tokenId) view returns (uint256)",
   "function repairToken() view returns (address)",
+  "event RodMinted(uint256 indexed tokenId, address indexed owner, uint8 rodType, uint8 rarity)",
   "event UpgradeResolved(uint256 indexed tokenId, bool success, uint8 newLevel, uint8 attr, uint16 deltaBps)",
 ] as const;
 
@@ -142,6 +144,36 @@ export async function getOwnerOf(tokenId: number, provider: ethers.Provider) {
 export async function fetchRodsForOwner(owner: string, provider: ethers.Provider, maxToken = 200) {
   const c = getFishingRodContract(provider);
   const found: RodData[] = [];
+
+  try {
+    const filter = (c as any).filters?.RodMinted?.(null, owner);
+    if (filter) {
+      const logs = await (c as any).queryFilter(filter, 0, "latest");
+      const ids = logs
+        .map((l: any) => Number(l?.args?.tokenId?.toString?.() ?? l?.args?.[0]))
+        .filter((n: number) => Number.isFinite(n) && n > 0);
+      const tokenIds: number[] = Array.from(new Set<number>(ids));
+      tokenIds.sort((a, b) => a - b);
+
+      if (tokenIds.length > 0) {
+        for (const tokenId of tokenIds) {
+          try {
+            const o = await c.ownerOf(tokenId);
+            if (!o || o.toLowerCase() !== owner.toLowerCase()) continue;
+            const mapped = await getRodOnChain(tokenId, provider);
+            if (mapped) {
+              mapped.owner = o;
+              found.push(mapped);
+            }
+          } catch {
+          }
+        }
+        return found;
+      }
+    }
+  } catch {
+  }
+
   const calls: Promise<void>[] = [] as any;
   for (let id = 1; id <= maxToken; id++) {
     calls.push((async (tokenId: number) => {
@@ -186,8 +218,27 @@ export async function getPartialRepairCost(tokenId: number, restore: number, pro
 export async function mintRodOnChain(rodType: number, signer: ethers.Signer) {
   const s = await resolveToSigner(signer);
   const c = getFishingRodContract(s);
-  const price = await c.mintPriceWei(rodType);
-  const tx = await c.mintRod(rodType, { value: price });
+  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545";
+  const readProvider = new ethers.JsonRpcProvider(rpcUrl);
+  const price = await getMintPrice(rodType, readProvider);
+  const from = await s.getAddress();
+  const nonce = await readProvider.getTransactionCount(from, "latest");
+  const feeData = await readProvider.getFeeData();
+  let gasLimit: bigint | undefined;
+  try {
+    const gasEstimate = await (c as any).getFunction("mintRod").estimateGas(rodType, { value: price });
+    gasLimit = (BigInt(gasEstimate.toString()) * BigInt(12)) / BigInt(10);
+  } catch {
+    gasLimit = undefined;
+  }
+  const overrides: any = { value: price, nonce, gasLimit };
+  if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
+    overrides.maxFeePerGas = feeData.maxFeePerGas;
+    overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+  } else if (feeData.gasPrice != null) {
+    overrides.gasPrice = feeData.gasPrice;
+  }
+  const tx = await c.mintRod(rodType, overrides);
   return tx;
 }
 
@@ -208,8 +259,25 @@ export async function repairPartialOnChain(tokenId: number, restore: number, sig
 export async function upgradeOnChain(tokenId: number, signer: ethers.Signer, value?: ethers.BigNumberish) {
   const s = await resolveToSigner(signer);
   const c = getFishingRodContract(s);
-  if (value) return await c.upgrade(tokenId, { value });
-  return await c.upgrade(tokenId);
+  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545";
+  const readProvider = new ethers.JsonRpcProvider(rpcUrl);
+  const from = await s.getAddress();
+  const nonce = await readProvider.getTransactionCount(from, "latest");
+  const feeData = await readProvider.getFeeData();
+  const overrides: any = { nonce };
+  if (value) overrides.value = value;
+  if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
+    overrides.maxFeePerGas = feeData.maxFeePerGas;
+    overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+  } else if (feeData.gasPrice != null) {
+    overrides.gasPrice = feeData.gasPrice;
+  }
+  try {
+    const gasEstimate = await (c as any).getFunction("upgrade").estimateGas(tokenId, overrides);
+    overrides.gasLimit = (BigInt(gasEstimate.toString()) * BigInt(12)) / BigInt(10);
+  } catch {
+  }
+  return await c.upgrade(tokenId, overrides);
 }
 
 // --- Simulation helpers (no tx sent) ---
@@ -279,6 +347,9 @@ export async function simulateUpgrade(tokenId: number, level: number | null, pro
 
 // Watch for UpgradeResolved events and call callback(tokenId:number, success:boolean, newLevel:number, attr:number, delta:number)
 export function watchUpgradeResolved(signerOrProvider: ethers.Signer | ethers.Provider, callback: (tokenId: number, success: boolean, newLevel: number, attr: number, delta: number) => void) {
+  if (!FISHING_ROD_ADDRESS || FISHING_ROD_ADDRESS === ZERO_ADDRESS) {
+    return () => {};
+  }
   const c = getFishingRodContract(signerOrProvider as any);
   const handler = (tokenId: any, success: any, newLevel: any, attr: any, delta: any) => {
     try {

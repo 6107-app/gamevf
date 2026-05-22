@@ -1,9 +1,10 @@
 import { ethers } from "ethers";
 
-const RPC_URL = "http://127.0.0.1:8545";
-const PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const GAME_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
-const VRF_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const VRF_ADDRESS = process.env.VRF_ADDRESS;
+const GAME_ADDRESS = process.env.GAME_ADDRESS;
+const ROD_ADDRESS = process.env.ROD_ADDRESS;
 
 const GAME_ABI = [
   "event CastRequested(uint256 indexed roomId, address player, uint256 requestId)",
@@ -11,34 +12,117 @@ const GAME_ABI = [
   "function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external",
 ];
 
-const VRF_ABI = [
-  "function fulfill(address game, uint256 reqId) external",
+const ROD_ABI = [
+  "event UpgradeRequested(uint256 indexed tokenId, uint256 indexed requestId, address indexed requester, uint8 fromLevel)",
 ];
+
+const VRF_ABI = [
+  "function fulfill(uint256 reqId) external",
+];
+
+function requireAddress(name, value) {
+  if (!value) {
+    console.error(`缺少环境变量：${name}`);
+    process.exit(1);
+  }
+  if (!ethers.isAddress(value)) {
+    console.error(`地址格式不正确：${name}=${value}`);
+    process.exit(1);
+  }
+  return value;
+}
+
+if (!PRIVATE_KEY) {
+  console.error("缺少环境变量：PRIVATE_KEY");
+  process.exit(1);
+}
+
+requireAddress("VRF_ADDRESS", VRF_ADDRESS);
+requireAddress("GAME_ADDRESS", GAME_ADDRESS);
+if (ROD_ADDRESS) requireAddress("ROD_ADDRESS", ROD_ADDRESS);
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, provider);
 const vrf = new ethers.Contract(VRF_ADDRESS, VRF_ABI, signer);
+const rod = ROD_ADDRESS ? new ethers.Contract(ROD_ADDRESS, ROD_ABI, provider) : null;
 
 console.log("🎣 AutoFulfill 监听中...");
-console.log(`合约地址: ${GAME_ADDRESS}`);
+console.log(`RPC:      ${RPC_URL}`);
+console.log(`Game:     ${GAME_ADDRESS}`);
+if (rod) console.log(`Rod:      ${ROD_ADDRESS}`);
 console.log(`VRF地址:  ${VRF_ADDRESS}`);
-console.log("等待 CastRequested / RecastStarted 事件...\n");
+console.log("等待 CastRequested / RecastStarted / UpgradeRequested 事件...\n");
+
+const inFlight = new Set();
+
+async function fulfill(requestId) {
+  const key = requestId?.toString?.() ?? String(requestId);
+  if (inFlight.has(key)) return null;
+  inFlight.add(key);
+  await new Promise((r) => setTimeout(r, 250));
+  try {
+    const tx = await vrf.fulfill(requestId);
+    await tx.wait();
+    return tx.hash;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function backfillRecentRequests() {
+  const currentBlock = await provider.getBlockNumber();
+  const fromBlock = Math.max(0, currentBlock - 800);
+
+  const requestIds = new Set();
+
+  try {
+    const logs = await game.queryFilter(game.filters.CastRequested(), fromBlock, "latest");
+    for (const l of logs) {
+      const requestId = l?.args?.[2];
+      if (requestId !== undefined && requestId !== null) requestIds.add(requestId.toString());
+    }
+  } catch {}
+
+  if (rod) {
+    try {
+      const logs = await rod.queryFilter(rod.filters.UpgradeRequested(), fromBlock, "latest");
+      for (const l of logs) {
+        const requestId = l?.args?.[1];
+        if (requestId !== undefined && requestId !== null) requestIds.add(requestId.toString());
+      }
+    } catch {}
+  }
+
+  const ids = [...requestIds];
+  if (ids.length === 0) return;
+
+  console.log(`检测到近 ${currentBlock - fromBlock} 个区块内可能未回调的请求：${ids.length} 个`);
+  for (const id of ids) {
+    try {
+      const txHash = await fulfill(BigInt(id));
+      if (txHash) console.log(`✅ 已回调 requestId=${id} tx=${txHash}`);
+    } catch (e) {
+      const msg = e?.shortMessage || e?.message || String(e);
+      console.log(`⏭️  跳过 requestId=${id}（可能已回调或不可回调）：${msg}`);
+    }
+  }
+  console.log("");
+}
+
+await backfillRecentRequests();
 
 // 监听 CastRequested（初次抛竿）
 game.on("CastRequested", async (roomId, player, requestId) => {
   console.log(`\n🎯 检测到抛竿！`);
   console.log(`   房间: ${roomId}  玩家: ${player}`);
   console.log(`   RequestId: ${requestId}`);
-  
-  // 等1秒再触发，模拟VRF延迟
-  await new Promise(r => setTimeout(r, 1000));
-  
+
   try {
     console.log(`   触发 VRF 回调...`);
-    const tx = await vrf.fulfill(GAME_ADDRESS, requestId);
-    await tx.wait();
-    console.log(`   ✅ VRF 回调成功！tx: ${tx.hash}`);
+    const txHash = await fulfill(requestId);
+    if (txHash) console.log(`   ✅ VRF 回调成功！tx: ${txHash}`);
+    else console.log(`   ⏭️  已在回调中，跳过重复请求`);
   } catch (e) {
     console.error(`   ❌ VRF 回调失败:`, e.message);
   }
@@ -49,30 +133,51 @@ game.on("RecastStarted", async (roomId, player, recastNumber) => {
   console.log(`\n🎲 检测到重投！`);
   console.log(`   房间: ${roomId}  玩家: ${player}  第${recastNumber}次重投`);
 
-  // 读取最新的 requestId（recast 也会触发 VRF 请求）
-  // 通过监听最近的交易日志来获取 requestId
-  await new Promise(r => setTimeout(r, 500));
-
   try {
-    // 获取最新区块的日志找到 requestId
     const filter = game.filters.CastRequested();
-    const logs = await game.queryFilter(filter, -5);
+    const currentBlock = await provider.getBlockNumber();
+    const fromBlock = Math.max(0, currentBlock - 200);
+    const logs = await game.queryFilter(filter, fromBlock, "latest");
     if (logs.length === 0) {
       console.error("   ❌ 找不到对应的 CastRequested 事件");
       return;
     }
-    const latest = logs[logs.length - 1];
+    const candidates = logs.filter((l) => {
+      const args = l.args;
+      if (!args) return false;
+      const rid = args[0];
+      const p = args[1];
+      return rid === roomId && typeof p === "string" && p.toLowerCase() === player.toLowerCase();
+    });
+    const latest = (candidates.length > 0 ? candidates : logs)[(candidates.length > 0 ? candidates : logs).length - 1];
     const requestId = latest.args[2];
-    
+
     console.log(`   RequestId: ${requestId}`);
     console.log(`   触发 VRF 回调...`);
-    const tx = await vrf.fulfill(GAME_ADDRESS, requestId);
-    await tx.wait();
-    console.log(`   ✅ VRF 回调成功！tx: ${tx.hash}`);
+    const txHash = await fulfill(requestId);
+    if (txHash) console.log(`   ✅ VRF 回调成功！tx: ${txHash}`);
+    else console.log(`   ⏭️  已在回调中，跳过重复请求`);
   } catch (e) {
     console.error(`   ❌ VRF 回调失败:`, e.message);
   }
 });
+
+if (rod) {
+  rod.on("UpgradeRequested", async (tokenId, requestId, requester, fromLevel) => {
+    console.log(`\n⬆️  检测到升级请求！`);
+    console.log(`   TokenId: ${tokenId}  FromLevel: ${fromLevel}`);
+    console.log(`   RequestId: ${requestId}  Requester: ${requester}`);
+
+    try {
+      console.log(`   触发 VRF 回调...`);
+      const txHash = await fulfill(requestId);
+      if (txHash) console.log(`   ✅ VRF 回调成功！tx: ${txHash}`);
+      else console.log(`   ⏭️  已在回调中，跳过重复请求`);
+    } catch (e) {
+      console.error(`   ❌ VRF 回调失败:`, e.message);
+    }
+  });
+}
 
 // 保持进程运行
 process.on("SIGINT", () => {

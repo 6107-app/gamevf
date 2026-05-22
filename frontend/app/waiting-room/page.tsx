@@ -40,7 +40,7 @@ function WaitingRoom() {
   const searchParams = useSearchParams();
   const roomId = searchParams.get("roomId");
 
-  const { wallet, getReadContract, getWriteContract } = useContract();
+  const { wallet, getReadContract, getRpcReadContract, getWriteContract } = useContract();
   const isContractReady = wallet.address && FISHING_GAME_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   const [players, setPlayers] = useState<PlayerData[]>(MOCK_PLAYERS);
@@ -105,7 +105,7 @@ function WaitingRoom() {
   // Listen for PlayerJoined events
   useEffect(() => {
     if (!isContractReady || !roomId) return;
-    const contract = getReadContract();
+    const contract = getRpcReadContract();
     if (!contract) return;
 
     const roomIdNum = Number(roomId);
