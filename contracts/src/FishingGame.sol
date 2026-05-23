@@ -332,6 +332,7 @@ contract FishingGame is VRFConsumerBaseV2Plus, ReentrancyGuard {
 
         vrfRequests[requestId] = VRFRequest(roomId, idx, true);
         _consumeEquippedRod(player.rodTokenId, 12);
+        emit CastRequested(roomId, msg.sender, requestId);
         emit RecastStarted(roomId, msg.sender, player.recastCount);
     }
 

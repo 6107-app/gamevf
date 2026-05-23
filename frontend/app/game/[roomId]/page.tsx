@@ -138,6 +138,7 @@ function GameScreen() {
   const isDemoFishing = rodSource === "demo";
   const pendingFishRef = useRef<FishResult | null>(null);
   const phaseRef = useRef<GamePhase>(phase);
+  const reelHitRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -266,6 +267,9 @@ function GameScreen() {
         };
         pendingFishRef.current = fishData;
         const p = phaseRef.current;
+        if (p === "dice_roll") {
+          return;
+        }
         if (p === "waiting_vrf" || p === "waiting_cast") {
           setPhase("reeling");
         } else if (p === "reeling") {
@@ -299,7 +303,7 @@ function GameScreen() {
         setCastCount(c => c + 1);
         setTimeout(() => {
           setDiceResult(null);
-          setPhase("waiting_cast");
+          setPhase(pendingFishRef.current ? "reeling" : "waiting_cast");
         }, 2500);
       }
     };
@@ -367,6 +371,29 @@ function GameScreen() {
       setTxPending(false);
     }
   }, [phase, txPending, isContractReady, roomId, getWriteContract, selectedRodId, canStartFishing, isDemoFishing]);
+
+  const registerReelHit = useCallback((fn: (() => void) | null) => {
+    reelHitRef.current = fn;
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isSpace = e.code === "Space" || e.key === " " || (e as any).keyCode === 32;
+      if (!isSpace) return;
+      const p = phaseRef.current;
+      if (p === "waiting_cast") {
+        e.preventDefault();
+        handleCast();
+        return;
+      }
+      if (p === "reeling") {
+        e.preventDefault();
+        reelHitRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleCast]);
 
   // 收竿结果 (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
@@ -512,6 +539,7 @@ function GameScreen() {
         castCount={castCount}
         recastFee={recastFee}
         txPending={txPending}
+        registerReelHit={registerReelHit}
       />
 
       {/* 骰子弹窗 */}
@@ -928,7 +956,7 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
 }
 
 // ── 中央游戏区 ───────────────────────────────────────────
-function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recastFee, txPending }: {
+function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recastFee, txPending, registerReelHit }: {
   phase: GamePhase;
   fish: FishResult | null;
   onReel: (r: "perfect" | "good" | "ok" | "miss") => void;
@@ -937,6 +965,7 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recas
   castCount: number;
   recastFee: string;
   txPending: boolean;
+  registerReelHit: (fn: (() => void) | null) => void;
 }) {
   return (
     <div style={{
@@ -946,7 +975,7 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recas
     }}>
       {phase === "waiting_cast" && <WaitingCastUI txPending={txPending} />}
       {phase === "waiting_vrf"  && <WaitingVRFUI />}
-      {phase === "reeling"      && <ReelingBar onResult={onReel} />}
+      {phase === "reeling"      && <ReelingBar onResult={onReel} registerHit={registerReelHit} />}
       {(phase === "fish_result" || phase === "decision") && fish && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
           <FishCard fish={fish} />
@@ -1060,8 +1089,9 @@ function WaitingVRFUI() {
 }
 
 // ── 收竿 Bar ─────────────────────────────────────────────
-function ReelingBar({ onResult }: {
+function ReelingBar({ onResult, registerHit }: {
   onResult: (r: "perfect" | "good" | "ok" | "miss") => void;
+  registerHit?: (fn: (() => void) | null) => void;
 }) {
   const [pos, setPos] = useState(50); // 0-100
   const [dir, setDir] = useState(1);
@@ -1099,6 +1129,11 @@ function ReelingBar({ onResult }: {
     setFeedback(fb);
     setTimeout(() => onResult(result), 900);
   }, [onResult]);
+
+  useEffect(() => {
+    registerHit?.(() => handleHit());
+    return () => registerHit?.(null);
+  }, [registerHit, handleHit]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

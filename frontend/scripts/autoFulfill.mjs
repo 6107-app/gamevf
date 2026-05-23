@@ -11,7 +11,6 @@ const ROD_ADDRESS = process.env.ROD_ADDRESS;
 
 const GAME_ABI = [
   "event CastRequested(uint256 indexed roomId, address player, uint256 requestId)",
-  "event RecastStarted(uint256 indexed roomId, address player, uint256 recastNumber)",
   "function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external",
 ];
 
@@ -137,40 +136,6 @@ game.on("CastRequested", async (roomId, player, requestId) => {
   console.log(`   RequestId: ${requestId}`);
 
   try {
-    console.log(`   触发 VRF 回调...`);
-    const txHash = await fulfill(requestId);
-    if (txHash) console.log(`   ✅ VRF 回调成功！tx: ${txHash}`);
-    else console.log(`   ⏭️  已在回调中，跳过重复请求`);
-  } catch (e) {
-    console.error(`   ❌ VRF 回调失败:`, e.message);
-  }
-});
-
-// 监听 RecastStarted（重投）
-game.on("RecastStarted", async (roomId, player, recastNumber) => {
-  console.log(`\n🎲 检测到重投！`);
-  console.log(`   房间: ${roomId}  玩家: ${player}  第${recastNumber}次重投`);
-
-  try {
-    const filter = game.filters.CastRequested();
-    const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - 200);
-    const logs = await game.queryFilter(filter, fromBlock, "latest");
-    if (logs.length === 0) {
-      console.error("   ❌ 找不到对应的 CastRequested 事件");
-      return;
-    }
-    const candidates = logs.filter((l) => {
-      const args = l.args;
-      if (!args) return false;
-      const rid = args[0];
-      const p = args[1];
-      return rid === roomId && typeof p === "string" && p.toLowerCase() === player.toLowerCase();
-    });
-    const latest = (candidates.length > 0 ? candidates : logs)[(candidates.length > 0 ? candidates : logs).length - 1];
-    const requestId = latest.args[2];
-
-    console.log(`   RequestId: ${requestId}`);
     console.log(`   触发 VRF 回调...`);
     const txHash = await fulfill(requestId);
     if (txHash) console.log(`   ✅ VRF 回调成功！tx: ${txHash}`);
