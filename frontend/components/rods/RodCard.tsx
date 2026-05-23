@@ -4,10 +4,10 @@ import { RodData, ROD_TYPES, ROD_RARITY_COLORS, ROD_MAX_LEVEL } from "@/lib/rod"
 import RodDurabilityBar from "./RodDurabilityBar";
 
 const ATTRIBUTE_LABELS = [
-  { key: "speedBonus", label: "Speed", hint: "降低时间消耗", color: "#8B6355" },
-  { key: "weightBonus", label: "Weight", hint: "提高鱼重量区间", color: "#8B6355" },
-  { key: "luckBonus", label: "Luck", hint: "提高稀有度概率", color: "#8B6355" },
-  { key: "stabilityBps", label: "Stability", hint: "降低空杆/Debuff影响", color: "#8B6355" },
+  { key: "speedBonus", label: "Speed", hint: "Reduces time cost", color: "#8B6355" },
+  { key: "weightBonus", label: "Weight", hint: "Increases fish weight range", color: "#8B6355" },
+  { key: "luckBonus", label: "Luck", hint: "Increases rare catch chance", color: "#8B6355" },
+  { key: "stabilityBps", label: "Stability", hint: "Reduces misses / debuff effects", color: "#8B6355" },
 ] as const;
 
 interface RodCardProps {
@@ -137,7 +137,7 @@ export default function RodCard({
             color: "var(--brown-light)",
             marginBottom: "6px",
           }}>
-            等级进度：+{rod.level} / +{ROD_MAX_LEVEL}
+            Level Progress: +{rod.level} / +{ROD_MAX_LEVEL}
           </div>
           <div className="rod-upgrade-progress">
             {Array.from({ length: ROD_MAX_LEVEL + 1 }).map((_, i) => (
@@ -159,7 +159,7 @@ export default function RodCard({
             color: "var(--brown-light)",
             marginBottom: "6px",
           }}>
-            耐久度：
+            Durability:
           </div>
           <RodDurabilityBar rod={rod} showLabel={true} size="medium" />
         </div>
@@ -188,7 +188,7 @@ export default function RodCard({
           color: "var(--brown)",
           marginBottom: "6px",
         }}>
-          属性加成
+          Attribute Bonuses
         </div>
         <div style={{
           display: "grid",
