@@ -339,13 +339,14 @@ function GameScreen() {
     if (phase !== "waiting_cast" || txPending) return;
 
     if (!canStartFishing) {
-      alert("请先选择一把可用的鱼竿。");
+      alert("Please select a usable rod first.");
       return;
     }
 
-    // 合约模式：必须有真实鱼竿
-    if (!canStartFishing) {
-      alert("Please select a usable rod first.");
+    // demo 模式或合约地址未配置：直接走 mock 流程
+    if (!isContractReady || !roomId || isDemoFishing) {
+      setPhase("waiting_vrf");
+      setTimeout(() => setPhase("reeling"), 2000);
       return;
     }
 
