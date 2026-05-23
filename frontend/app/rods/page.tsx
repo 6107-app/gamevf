@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/ui/Navbar";
 import RodCard from "@/components/rods/RodCard";
@@ -18,7 +18,15 @@ const TIER_REQUIRED_LEVELS: Record<RoomTier, number> = {
   "Diamond": 3,
 };
 
-export default function RodsHallPage() {
+export default function RodsHallPageWrapper() {
+  return (
+    <Suspense>
+      <RodsHallPage />
+    </Suspense>
+  );
+}
+
+function RodsHallPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requiredTier = searchParams.get("tier") as RoomTier | null;
