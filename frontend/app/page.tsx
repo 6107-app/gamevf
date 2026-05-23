@@ -11,7 +11,7 @@ import { fetchRodsForOwner } from "@/lib/fishingRod";
 import { ethers } from "ethers";
 
 type RoomTier = "Bronze" | "Silver" | "Gold" | "Diamond";
-type FilterTier = "全部" | RoomTier;
+type FilterTier = "All" | RoomTier;
 
 interface RoomData {
   roomId: number;
@@ -23,7 +23,7 @@ interface RoomData {
 }
 
 const TIER_FILTER_COLORS: Record<FilterTier, string> = {
-  "全部":    "#FF7B6B",
+  "All":     "#FF7B6B",
   "Bronze":  "#C8956C",
   "Silver":  "#A8B8C8",
   "Gold":    "#E8C547",
@@ -31,19 +31,19 @@ const TIER_FILTER_COLORS: Record<FilterTier, string> = {
 };
 
 const ROOM_NAMES: Record<RoomTier, string[]> = {
-  Bronze:  ["芦苇湾", "竹林湾", "草塘"],
-  Silver:  ["荷花池", "银月湖", "清风渡"],
-  Gold:    ["金鳞湖", "锦鲤潭", "龙门坊"],
-  Diamond: ["星钻湾", "龙宫阁", "仙人渡"],
+  Bronze:  ["Reed Cove", "Bamboo Bay", "Grass Pond"],
+  Silver:  ["Lotus Pool", "Silver Moon Lake", "Clear Wind Crossing"],
+  Gold:    ["Golden Scale Lake", "Koi Depths", "Dragon Gate Quarter"],
+  Diamond: ["Stardiamond Bay", "Dragon Palace Pavilion", "Immortal Crossing"],
 };
 
 function generateRoomName(tier: RoomTier, roomId: number): string {
   const names = ROOM_NAMES[tier];
-  return `${names[roomId % names.length]} ${roomId + 1}号`;
+  return `${names[roomId % names.length]} #${roomId + 1}`;
 }
 
 export default function Home() {
-  const [filter, setFilter] = useState<FilterTier>("全部");
+  const [filter, setFilter] = useState<FilterTier>("All");
   const [liveOnly, setLiveOnly] = useState(false);
   const [rooms, setRooms] = useState<RoomData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -118,7 +118,7 @@ export default function Home() {
   // Join room handler
   const handleJoin = async (roomId: number, tierName: string, entryFee: string) => {
     if (!isContractReady) {
-      alert(`加入房间 ${roomId}`);
+      alert(`Joining room ${roomId}`);
       return;
     }
     const contract = getWriteContract();
@@ -132,9 +132,9 @@ export default function Home() {
         const eligible = rods.filter(r => r.level >= requiredLevel);
         if (eligible.length === 0) {
           if (requiredLevel <= 0) {
-            alert("需要至少一把鱼竿才能加入房间。");
+            alert("You need at least one fishing rod to join a room.");
           } else {
-            alert(`鱼竿等级不足！加入 ${tierName} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+            alert(`Rod level too low! Joining a ${tierName} room requires a Lv.${requiredLevel}+ rod.`);
           }
           return;
         }
@@ -163,21 +163,21 @@ export default function Home() {
       if (revertData && revertData.toLowerCase().startsWith(insufficientRodSelector)) {
         const requiredLevel = requiredRodLevelForTier(tierName as ContractRoomTier);
         if (requiredLevel <= 0) {
-          alert("需要至少一把鱼竿才能加入房间。");
+          alert("You need at least one fishing rod to join a room.");
         } else {
-          alert(`鱼竿等级不足！加入 ${tierName} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+          alert(`Rod level too low! Joining a ${tierName} room requires a Lv.${requiredLevel}+ rod.`);
         }
         return;
       }
 
-      const msg = anyErr?.shortMessage || anyErr?.message || "加入失败";
+      const msg = anyErr?.shortMessage || anyErr?.message || "Failed to join";
       alert(msg);
     } finally {
     }
   };
 
   const filtered = rooms.filter(r => {
-    if (filter !== "全部" && r.tier !== filter) return false;
+    if (filter !== "All" && r.tier !== filter) return false;
     if (liveOnly && !r.isLivestream) return false;
     return true;
   });
@@ -207,7 +207,7 @@ export default function Home() {
             display: "flex", alignItems: "center",
             gap: "10px", marginBottom: "20px", flexWrap: "wrap",
           }}>
-            {(["全部", "Bronze", "Silver", "Gold", "Diamond"] as FilterTier[]).map(t => (
+            {(["All", "Bronze", "Silver", "Gold", "Diamond"] as FilterTier[]).map(t => (
               <button key={t} onClick={() => setFilter(t)} style={{
                 background: filter === t ? TIER_FILTER_COLORS[t] : "white",
                 color: filter === t ? "white" : "var(--brown)",
@@ -228,7 +228,7 @@ export default function Home() {
               marginLeft: "auto",
             }}>
               <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--brown-light)" }}>
-                只看直播
+                Live Only
               </span>
               <div onClick={() => setLiveOnly(!liveOnly)} style={{
                 width: "44px", height: "24px",
@@ -258,7 +258,7 @@ export default function Home() {
               textAlign: "center", padding: "40px",
               color: "var(--brown-light)", fontSize: "14px",
             }}>
-              🐠 加载房间中...
+              🐠 Loading rooms...
             </div>
           )}
 
@@ -270,7 +270,7 @@ export default function Home() {
                   textAlign: "center", padding: "60px",
                   color: "var(--brown-light)", fontSize: "15px",
                 }}>
-                  🎣 暂无符合条件的房间，要不要创建一个？
+                  🎣 No rooms match your filter. Why not create one?
                 </div>
               ) : filtered.map(room => (
                 <RoomCard key={room.roomId} {...room}
@@ -288,7 +288,7 @@ export default function Home() {
             borderRadius: "20px",
           }}>
 
-            🚩 创建新房间
+            🚩 Create New Room
           </button>
         </div>
 
@@ -309,10 +309,10 @@ export default function Home() {
                 <div style={{ fontWeight: 800, fontSize: "15px", color: "var(--brown)" }}>
                   {wallet.address
                     ? `${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`
-                    : "未连接钱包"}
+                    : "Wallet Not Connected"}
                 </div>
                 <div style={{ fontSize: "12px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  {wallet.address ? "已连接" : "连接后查看战绩"}
+                  {wallet.address ? "Connected" : "Connect to view stats"}
                 </div>
               </div>
             </div>
@@ -321,8 +321,8 @@ export default function Home() {
               gap: "10px",
             }}>
               {[
-                { label: "今日场次", value: "—" },
-                { label: "本周最佳", value: "—" },
+                { label: "Today's Games", value: "—" },
+                { label: "Best This Week", value: "—" },
               ].map(item => (
                 <div key={item.label} style={{
                   background: "var(--cream)",
@@ -374,11 +374,11 @@ export default function Home() {
                 <div style={{
                   fontWeight: 800, fontSize: "14px",
                   color: "var(--brown)", marginBottom: "2px",
-                }}>我的鱼竿库</div>
+                }}>My Rod Collection</div>
                 <div style={{
                   fontSize: "11px",
                   color: "var(--brown-light)",
-                }}>点击查看并管理你的所有鱼竿</div>
+                }}>Click to view and manage all your rods</div>
               </div>
               <div style={{
                 fontSize: "18px",
@@ -411,10 +411,10 @@ export default function Home() {
           {/* 推荐好友 */}
           <div className="card" style={{ padding: "20px" }}>
             <div style={{ fontWeight: 800, fontSize: "14px", color: "var(--brown)", marginBottom: "8px" }}>
-              🎁 推荐好友
+              🎁 Refer a Friend
             </div>
             <p style={{ fontSize: "12px", color: "var(--brown-light)", lineHeight: 1.6, marginBottom: "12px" }}>
-              邀朋友一起钓鱼，每次你都有小惊喜 🎁
+              Invite friends to fish together and earn little surprises every time 🎁
             </p>
             <div style={{
               background: "var(--cream)", borderRadius: "12px",
@@ -429,15 +429,15 @@ export default function Home() {
                 color: "white", border: "none",
                 borderRadius: "8px", padding: "4px 10px",
                 fontSize: "11px", fontWeight: 700, cursor: "pointer",
-              }}>复制</button>
+              }}>Copy</button>
             </div>
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr",
               gap: "8px", marginTop: "10px",
             }}>
               {[
-                { label: "已推荐", value: "0 人" },
-                { label: "累计返佣", value: "0 ETH" },
+                { label: "Referred", value: "0 Users" },
+                { label: "Total Rebate", value: "0 ETH" },
               ].map(item => (
                 <div key={item.label} style={{
                   background: "var(--mint)",

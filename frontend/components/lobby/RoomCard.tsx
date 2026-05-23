@@ -106,7 +106,7 @@ export default function RoomCard({
                 borderRadius: "50%",
                 display: "inline-block",
               }}/>
-              直播
+              Live
             </span>
           )}
         </div>
@@ -128,7 +128,7 @@ export default function RoomCard({
             ))}
           </div>
           <span style={{ fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
-            {playerCount}/4 人
+            {playerCount}/4 players
           </span>
         </div>
       </div>
@@ -145,7 +145,7 @@ export default function RoomCard({
             fontWeight: 700,
             fontSize: "13px",
             cursor: "not-allowed",
-          }}>已满</button>
+          }}>Full</button>
         ) : isLivestream ? (
           <button onClick={onWatch} style={{
             background: "#FFF0F0",
@@ -156,11 +156,11 @@ export default function RoomCard({
             fontWeight: 700,
             fontSize: "13px",
             cursor: "pointer",
-          }}>👁 观看</button>
+          }}>👁 Watch</button>
         ) : (
           <button onClick={onJoin} className="btn-primary"
             style={{ padding: "10px 18px", fontSize: "13px" }}>
-            加入
+            Join
           </button>
         )}
       </div>
