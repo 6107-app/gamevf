@@ -343,16 +343,9 @@ function GameScreen() {
       return;
     }
 
-<<<<<<< HEAD
-    if (!isContractReady || !roomId || isDemoFishing) {
-      // Mock fallback
-      setPhase("waiting_vrf");
-      setTimeout(() => setPhase("reeling"), 2000);
-=======
     // 合约模式：必须有真实鱼竿
     if (!canStartFishing) {
       alert("Please select a usable rod first.");
->>>>>>> 3faf457 (change language)
       return;
     }
 
@@ -371,13 +364,9 @@ function GameScreen() {
       setTimeout(() => {
         setPhase(prev => prev === "waiting_vrf" ? "reeling" : prev);
       }, 5000);
-<<<<<<< HEAD
-    } catch {
-=======
     } catch (e: unknown) {
       console.error("cast error:", e);
       alert(e instanceof Error ? e.message : "Cast failed");
->>>>>>> 3faf457 (change language)
       setPhase("waiting_cast");
     } finally {
       setTxPending(false);
@@ -950,14 +939,10 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             </div>
             <button
               className="btn-primary"
-<<<<<<< HEAD
-              onClick={onStart}
-=======
               onClick={() => {
                 console.log("Start Fishing clicked, canStartFishing:", canStartFishing);
                 onStart();
               }}
->>>>>>> 3faf457 (change language)
               disabled={!canStartFishing}
               style={{
                 minWidth: "160px",
