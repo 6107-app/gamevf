@@ -25,10 +25,10 @@ const TIERS: {
   bg: string;
   desc: string;
 }[] = [
-  { tier: "Bronze", icon: "🪵", scene: "普通木码头", fee: "0.01", color: "#C8956C", bg: "#FFF5EE", desc: "新手友好，随意钓" },
-  { tier: "Silver", icon: "⛵", scene: "遮阳棚码头", fee: "0.05", color: "#7A9AB8", bg: "#F0F5FA", desc: "中级玩家首选" },
-  { tier: "Gold",   icon: "🏮", scene: "彩灯栈道",   fee: "0.10", color: "#C8A020", bg: "#FFFDE7", desc: "高手竞技场" },
-  { tier: "Diamond",icon: "🏝️", scene: "湖心岛凉亭", fee: "0.50", color: "#7E6AAA", bg: "#F5F0FF", desc: "顶级挑战，赢家通吃" },
+  { tier: "Bronze", icon: "🪵", scene: "Wooden Dock", fee: "0.01", color: "#C8956C", bg: "#FFF5EE", desc: "Beginner-friendly, casual fishing" },
+  { tier: "Silver", icon: "⛵", scene: "Shaded Pier", fee: "0.05", color: "#7A9AB8", bg: "#F0F5FA", desc: "Best for intermediate players" },
+  { tier: "Gold",   icon: "🏮", scene: "Lantern Boardwalk", fee: "0.10", color: "#C8A020", bg: "#FFFDE7", desc: "Competitive arena" },
+  { tier: "Diamond",icon: "🏝️", scene: "Island Pavilion", fee: "0.50", color: "#7E6AAA", bg: "#F5F0FF", desc: "Top-tier challenge, winner takes all" },
 ];
 
 export default function CreateRoom() {
@@ -59,7 +59,7 @@ export default function CreateRoom() {
 
     const contract = getWriteContract();
     if (!contract) {
-      setError("钱包未连接");
+      setError("Wallet not connected");
       setLoading(false);
       return;
     }
@@ -72,9 +72,9 @@ export default function CreateRoom() {
         const eligible = rods.filter(r => r.level >= requiredLevel);
         if (eligible.length === 0) {
           if (requiredLevel <= 0) {
-            setError("需要至少一把鱼竿才能创建房间。");
+            setError("You need at least one rod to create a room.");
           } else {
-            setError(`鱼竿等级不足：创建 ${selectedTier} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+            setError(`Rod level too low: creating a ${selectedTier} room requires a Lv.${requiredLevel}+ rod.`);
           }
           setLoading(false);
           return;
@@ -113,7 +113,7 @@ export default function CreateRoom() {
         router.push("/waiting-room");
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "创建失败";
+      const msg = e instanceof Error ? e.message : "Failed to create";
       setError(msg);
       setLoading(false);
     }
@@ -133,7 +133,7 @@ export default function CreateRoom() {
         padding: "100px 24px 48px",
       }}>
 
-        {/* 顶部标题 */}
+        {/* Title */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
           <button onClick={() => router.back()} style={{
             background: "white",
@@ -148,19 +148,19 @@ export default function CreateRoom() {
             fontFamily: "var(--font-serif)",
             fontSize: "22px", fontWeight: 700,
             color: "var(--brown)",
-          }}>创建钓鱼房间 🏠</h1>
+          }}>Create Fishing Room</h1>
         </div>
 
-        {/* 主卡片 */}
+        {/* Main card */}
         <div className="card" style={{ padding: "28px" }}>
 
-          {/* 等级选择 */}
+          {/* Tier selection */}
           <div style={{ marginBottom: "24px" }}>
             <div style={{
               fontSize: "13px", fontWeight: 700,
               color: "var(--brown-light)", marginBottom: "12px",
               textTransform: "uppercase", letterSpacing: "0.08em",
-            }}>选择房间等级</div>
+            }}>Select Tier</div>
 
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr",
@@ -198,18 +198,18 @@ export default function CreateRoom() {
             </div>
           </div>
 
-          {/* 分割线 */}
+          {/* Divider */}
           <div style={{ height: "1px", background: "var(--cream-dark)", margin: "4px 0 20px" }}/>
 
-          {/* 开关设置 */}
+          {/* Toggle settings */}
           <div style={{ marginBottom: "20px" }}>
             <div style={{
               fontSize: "13px", fontWeight: 700,
               color: "var(--brown-light)", marginBottom: "12px",
               textTransform: "uppercase", letterSpacing: "0.08em",
-            }}>房间设置</div>
+            }}>Room Settings</div>
 
-            {/* 公开/私人 */}
+            {/* Public/Private */}
             <div style={{
               display: "flex", alignItems: "center",
               justifyContent: "space-between",
@@ -218,16 +218,16 @@ export default function CreateRoom() {
             }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--brown)" }}>
-                  {isPublic ? "🌍 公开房间" : "🔒 私人房间"}
+                  {isPublic ? "Public Room" : "Private Room"}
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  {isPublic ? "所有人可见并加入" : "仅凭密码加入"}
+                  {isPublic ? "Visible and joinable by everyone" : "Password required to join"}
                 </div>
               </div>
               <Toggle value={isPublic} onChange={setIsPublic} />
             </div>
 
-            {/* 密码输入（私人房间展开） */}
+            {/* Password input (expands for private room) */}
             <div style={{
               overflow: "hidden",
               maxHeight: !isPublic ? "72px" : "0px",
@@ -241,7 +241,7 @@ export default function CreateRoom() {
                   }}>🔑</span>
                   <input
                     type="password"
-                    placeholder="设置房间密码"
+                    placeholder="Set room password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     style={{
@@ -260,7 +260,7 @@ export default function CreateRoom() {
               </div>
             </div>
 
-            {/* 直播开关 */}
+            {/* Livestream toggle */}
             <div style={{
               display: "flex", alignItems: "center",
               justifyContent: "space-between",
@@ -268,17 +268,17 @@ export default function CreateRoom() {
             }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--brown)" }}>
-                  📺 开放直播
+                  Live Stream
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  观众可实时观看并下注预测
+                  Spectators can watch live and place bets
                 </div>
               </div>
               <Toggle value={isLivestream} onChange={setIsLivestream} />
             </div>
           </div>
 
-          {/* 费用汇总 */}
+          {/* Fee summary */}
           <div style={{
             background: "var(--yellow-soft)",
             borderRadius: "16px",
@@ -291,7 +291,7 @@ export default function CreateRoom() {
               alignItems: "center", marginBottom: "8px",
             }}>
               <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--brown-light)" }}>
-                入场费
+                Entry Fee
               </span>
               <span style={{ fontSize: "22px", fontWeight: 900, color: "var(--brown)" }}>
                 {selected.fee} ETH
@@ -302,7 +302,7 @@ export default function CreateRoom() {
               alignItems: "center",
             }}>
               <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--brown-light)" }}>
-                满员奖池（预估）
+                Full Prize Pool (Est.)
               </span>
               <span style={{ fontSize: "16px", fontWeight: 800, color: selected.color }}>
                 {(parseFloat(selected.fee) * 4 * 0.95).toFixed(3)} ETH
@@ -312,11 +312,11 @@ export default function CreateRoom() {
               fontSize: "10px", color: "var(--brown-light)",
               marginTop: "8px", lineHeight: 1.5,
             }}>
-              * 平台收取 5% 手续费，奖池实发 95%
+              * Platform takes a 5% fee; 95% goes to the prize pool
             </div>
           </div>
 
-          {/* 错误提示 */}
+          {/* Error message */}
           {error && (
             <div style={{
               background: "#FFF0F0",
@@ -332,7 +332,7 @@ export default function CreateRoom() {
             </div>
           )}
 
-          {/* 确认按钮 */}
+          {/* Confirm button */}
           <button
             className="btn-primary"
             onClick={handleCreate}
@@ -351,9 +351,9 @@ export default function CreateRoom() {
                   display: "inline-block",
                   animation: "spin 1s linear infinite",
                 }}>🐠</span>
-                等待链上确认...
+                Waiting for on-chain confirmation...
               </>
-            ) : "出发钓鱼！🎣"}
+            ) : "Go Fishing!"}
           </button>
         </div>
       </div>
@@ -368,7 +368,7 @@ export default function CreateRoom() {
   );
 }
 
-// ── Toggle 组件 ──────────────────────────────────────────
+// ── Toggle component ──────────────────────────────────────────
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
     <div onClick={() => onChange(!value)} style={{

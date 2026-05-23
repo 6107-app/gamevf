@@ -51,13 +51,13 @@ const RARITY_BG: Record<Rarity, string> = {
   Legendary: "#FFFDE7",
 };
 const RARITY_LABEL: Record<Rarity, string> = {
-  Common: "普通", Rare: "稀有", SuperRare: "精品", Epic: "史诗", Legendary: "传说",
+  Common: "Common", Rare: "Rare", SuperRare: "Super Rare", Epic: "Epic", Legendary: "Legendary",
 };
 const STATUS_EMOJI: Record<PlayerStatus, string> = {
   waiting: "😴", fishing: "🎣", caught: "😍", locked: "✅",
 };
 const STATUS_LABEL: Record<PlayerStatus, string> = {
-  waiting: "等待中", fishing: "钓鱼中", caught: "已上钩", locked: "已锁定",
+  waiting: "Waiting", fishing: "Fishing", caught: "Hooked", locked: "Locked In",
 };
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ const MOCK_PLAYERS: Player[] = [
 
 const MOCK_EVENTS: LiveEvent[] = [
   { id: 1, timestamp: "02:41", playerEns: "vitalik.eth", playerAvatar: "🐙", type: "locked",  rarity: "Epic",  weight: 12400, score: 3870 },
-  { id: 2, timestamp: "02:15", playerEns: "vitalik.eth", playerAvatar: "🐙", type: "dice",    diceResult: "⚡ 超级Buff！稀有度 +30%" },
+  { id: 2, timestamp: "02:15", playerEns: "vitalik.eth", playerAvatar: "🐙", type: "dice",    diceResult: "⚡ Super Buff! Rarity +30%" },
   { id: 3, timestamp: "01:58", playerEns: "vitalik.eth", playerAvatar: "🐙", type: "recast"  },
   { id: 4, timestamp: "01:30", playerEns: "sakura.eth",  playerAvatar: "🦊", type: "caught",  rarity: "Rare",  weight: 3200,  score: 1240 },
   { id: 5, timestamp: "00:52", playerEns: "vitalik.eth", playerAvatar: "🐙", type: "caught",  rarity: "Rare",  weight: 2800,  score: 980  },
@@ -163,7 +163,7 @@ function PlayerCard({
           borderRadius: "10px", padding: "2px 10px",
           fontSize: "11px", fontWeight: 800,
         }}>
-          🎯 已押注
+          🎯 Bet Placed
         </div>
       )}
 
@@ -188,7 +188,7 @@ function PlayerCard({
           </div>
           <div style={{ fontSize: "11px", color: "var(--brown-light)", fontWeight: 600 }}>
             {STATUS_LABEL[player.status]}
-            {player.recastCount > 0 && ` · 重投${player.recastCount}次`}
+            {player.recastCount > 0 && ` · Recast ${player.recastCount}x`}
           </div>
         </div>
 
@@ -198,7 +198,7 @@ function PlayerCard({
             {fmtScore(player.score)}
           </div>
           <div style={{ fontSize: "11px", color: "var(--brown-light)", fontWeight: 600 }}>
-            分
+            pts
           </div>
         </div>
       </div>
@@ -230,7 +230,7 @@ function PlayerCard({
           marginBottom: "4px",
         }}>
           <span style={{ fontSize: "11px", color: "var(--brown-light)", fontWeight: 600 }}>
-            押注占比
+            Bet Share
           </span>
           <span style={{ fontSize: "11px", fontWeight: 800, color: "var(--brown)" }}>
             {odds}%
@@ -250,7 +250,7 @@ function PlayerCard({
           }} />
         </div>
         <div style={{ fontSize: "10px", color: "var(--brown-light)", marginTop: "3px" }}>
-          {betEth > 0 ? `${betEth.toFixed(4)} ETH 已押` : "暂无押注"}
+          {betEth > 0 ? `${betEth.toFixed(4)} ETH bet` : "No bets yet"}
         </div>
       </div>
     </div>
@@ -259,12 +259,12 @@ function PlayerCard({
 
 function EventItem({ event }: { event: LiveEvent }) {
   const typeConfig: Record<LiveEvent["type"], { label: string; color: string; icon: string }> = {
-    cast:   { label: "抛竿",   color: "#2196F3", icon: "🎣" },
-    caught: { label: "上钩！", color: "var(--coral)", icon: "🐟" },
-    recast: { label: "重投",   color: "#9C27B0", icon: "🔁" },
-    locked: { label: "锁定",   color: "var(--mint-dark)", icon: "✅" },
-    dice:   { label: "骰子",   color: "var(--gold)", icon: "🎲" },
-    bet:    { label: "下注",   color: "#7B1FA2", icon: "💰" },
+    cast:   { label: "Cast",    color: "#2196F3", icon: "🎣" },
+    caught: { label: "Hooked!", color: "var(--coral)", icon: "🐟" },
+    recast: { label: "Recast",  color: "#9C27B0", icon: "🔁" },
+    locked: { label: "Lock In", color: "var(--mint-dark)", icon: "✅" },
+    dice:   { label: "Dice",    color: "var(--gold)", icon: "🎲" },
+    bet:    { label: "Bet",     color: "#7B1FA2", icon: "💰" },
   };
   const cfg = typeConfig[event.type];
 
@@ -303,7 +303,7 @@ function EventItem({ event }: { event: LiveEvent }) {
           <div style={{
             fontSize: "11px", color: RARITY_COLOR[event.rarity], fontWeight: 700,
           }}>
-            {RARITY_LABEL[event.rarity]} · {fmtWeight(event.weight ?? 0)} · {fmtScore(event.score ?? 0)} 分
+            {RARITY_LABEL[event.rarity]} · {fmtWeight(event.weight ?? 0)} · {fmtScore(event.score ?? 0)} pts
           </div>
         )}
         {event.type === "dice" && (
@@ -313,7 +313,7 @@ function EventItem({ event }: { event: LiveEvent }) {
         )}
         {event.type === "locked" && event.rarity && (
           <div style={{ fontSize: "11px", color: "var(--mint-dark)", fontWeight: 700 }}>
-            最终：{RARITY_LABEL[event.rarity]} {fmtWeight(event.weight ?? 0)} · {fmtScore(event.score ?? 0)} 分
+            Final: {RARITY_LABEL[event.rarity]} {fmtWeight(event.weight ?? 0)} · {fmtScore(event.score ?? 0)} pts
           </div>
         )}
       </div>
@@ -585,7 +585,7 @@ export default function SpectatorPage() {
         id: Date.now(), timestamp: nowStr(),
         playerEns: ens, playerAvatar: avatar,
         type: "dice" as const,
-        diceResult: mod >= 0 ? `🎲 加成 +${mod}%` : `🎲 减益 ${mod}%`,
+        diceResult: mod >= 0 ? `🎲 Buff +${mod}%` : `🎲 Debuff ${mod}%`,
       }, ...prev].slice(0, 30));
     };
 
@@ -637,7 +637,7 @@ export default function SpectatorPage() {
           playerEns:    shortenAddr(bettor),
           playerAvatar: addrToAvatar(bettor),
           type: "bet" as const,
-          diceResult: `押 ${winner?.ens ?? shortenAddr(predictedWinner)} · ${(Number(amount) / 1e18).toFixed(4)} ETH`,
+          diceResult: `Bet on ${winner?.ens ?? shortenAddr(predictedWinner)} · ${(Number(amount) / 1e18).toFixed(4)} ETH`,
         }, ...prev].slice(0, 30));
         // Refresh odds after new bet
         fetchMarketData(playersRef.current.map(p => p.addr));
@@ -681,13 +681,13 @@ export default function SpectatorPage() {
     setBetError("");
 
     // ── Input validation ───────────────────────────────────────────────────
-    if (selectedIdx === null) { setBetError("请选择你要押注的玩家"); return; }
+    if (selectedIdx === null) { setBetError("Please select a player to bet on"); return; }
     const amt = parseFloat(betAmount);
-    if (isNaN(amt) || amt < 0.001) { setBetError("最低下注 0.001 ETH"); return; }
-    if (elapsed >= 180)            { setBetError("比赛已结束，无法下注"); return; }
+    if (isNaN(amt) || amt < 0.001) { setBetError("Minimum bet is 0.001 ETH"); return; }
+    if (elapsed >= 180)            { setBetError("Game is over, cannot place bet"); return; }
 
     const playerAddr = players[selectedIdx]?.addr;
-    if (!playerAddr) { setBetError("玩家地址无效"); return; }
+    if (!playerAddr) { setBetError("Invalid player address"); return; }
 
     // ── Dev/demo mode: no contract deployed ───────────────────────────────
     if (!marketReady) {
@@ -698,7 +698,7 @@ export default function SpectatorPage() {
 
     // ── Wallet check ──────────────────────────────────────────────────────
     if (!wallet.signer) {
-      setBetError("请先连接 MetaMask 钱包");
+      setBetError("Please connect your MetaMask wallet first");
       return;
     }
 
@@ -721,7 +721,7 @@ export default function SpectatorPage() {
       fetchMarketData(players.map(p => p.addr));
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; reason?: string; message?: string };
-      setBetError(err.shortMessage ?? err.reason ?? err.message ?? "下注失败，请重试");
+      setBetError(err.shortMessage ?? err.reason ?? err.message ?? "Bet failed, please try again");
     } finally {
       setTxPending(false);
     }
@@ -752,13 +752,13 @@ export default function SpectatorPage() {
             fontSize: "13px", fontWeight: 700, color: "var(--brown)",
             cursor: "pointer",
           }}>
-            ← 返回大厅
+            ← Back to Lobby
           </button>
 
           {/* Room name */}
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontWeight: 900, fontSize: "18px", color: "var(--brown)" }}>
-              房间 #{roomId}
+              Room #{roomId}
             </span>
             <span style={{
               background: tierColors[roomTierLabel] ?? tierColors["Silver"], color: "white",
@@ -770,28 +770,28 @@ export default function SpectatorPage() {
                 background: "#4CAF50", color: "white",
                 borderRadius: "8px", padding: "2px 8px",
                 fontSize: "10px", fontWeight: 700,
-              }}>⛓ 链上</span>
+              }}>⛓ On-chain</span>
             )}
             {roomStatus === 1 && (
               <span style={{
                 background: "#FF4444", color: "white",
                 borderRadius: "8px", padding: "2px 10px",
                 fontSize: "11px", fontWeight: 800,
-              }}>● 直播中</span>
+              }}>● LIVE</span>
             )}
             {roomStatus === 2 && (
               <span style={{
                 background: "#757575", color: "white",
                 borderRadius: "8px", padding: "2px 10px",
                 fontSize: "11px", fontWeight: 800,
-              }}>🏁 已结束</span>
+              }}>🏁 Finished</span>
             )}
             {roomStatus === 0 && (
               <span style={{
                 background: "#FFA726", color: "white",
                 borderRadius: "8px", padding: "2px 10px",
                 fontSize: "11px", fontWeight: 800,
-              }}>⏳ 等待开始</span>
+              }}>⏳ Waiting</span>
             )}
           </div>
 
@@ -809,7 +809,7 @@ export default function SpectatorPage() {
                 {timerStr}
               </div>
               <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
-                剩余时间
+                Time Left
               </div>
             </div>
             <div style={{ textAlign: "center" }}>
@@ -817,7 +817,7 @@ export default function SpectatorPage() {
                 {roomTotalPot.toFixed(3)} ETH
               </div>
               <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
-                玩家总奖池
+                Prize Pool
               </div>
             </div>
             <div style={{ textAlign: "center" }}>
@@ -825,7 +825,7 @@ export default function SpectatorPage() {
                 {marketTotalPool.toFixed(4)} ETH
               </div>
               <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
-                {marketBettingOpen ? "观众押注池 🔴" : "观众押注池"}
+                {marketBettingOpen ? "Spectator Bet Pool 🔴" : "Spectator Bet Pool"}
               </div>
             </div>
           </div>
@@ -843,7 +843,7 @@ export default function SpectatorPage() {
         {/* ── Left: Player Cards ── */}
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: "15px", color: "var(--brown)", marginBottom: "14px" }}>
-            🏆 实时排行
+            🏆 Live Rankings
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {ranked.map((p, i) => (
@@ -868,7 +868,7 @@ export default function SpectatorPage() {
             color: "var(--brown)", marginBottom: "14px",
             display: "flex", alignItems: "center", gap: "8px",
           }}>
-            📡 直播事件流
+            📡 Live Event Feed
             <span style={{
               width: "8px", height: "8px", borderRadius: "50%",
               background: "#FF4444", display: "inline-block",
@@ -885,7 +885,7 @@ export default function SpectatorPage() {
           {/* Inner sticky wrapper so content sticks while column stretches to full height */}
           <div style={{ position: "sticky", top: "24px" }}>
           <div style={{ fontWeight: 800, fontSize: "15px", color: "var(--brown)", marginBottom: "16px" }}>
-            🎯 竞猜下注
+            🎯 Place Your Bet
           </div>
 
           {hasBet ? (
@@ -893,20 +893,20 @@ export default function SpectatorPage() {
             <div style={{ textAlign: "center", padding: "20px 0" }}>
               <div style={{ fontSize: "40px", marginBottom: "12px" }}>🎉</div>
               <div style={{ fontWeight: 800, fontSize: "16px", color: "var(--brown)", marginBottom: "6px" }}>
-                下注成功！
+                Bet Placed Successfully!
               </div>
               <div style={{ fontSize: "13px", color: "var(--brown-light)", marginBottom: "16px" }}>
-                押注 {players[userBetIdx!].ens}
+                Bet on {players[userBetIdx!].ens}
               </div>
               <div style={{
                 background: "var(--cream)", borderRadius: "14px", padding: "14px",
               }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                   {[
-                    { label: "押注金额", value: `${betAmount} ETH` },
-                    { label: "时间权重", value: `×${timeWeight / 100}` },
-                    { label: "加权注额", value: `${(parseFloat(betAmount) * timeWeight / 100).toFixed(4)} ETH` },
-                    { label: "当前赔率", value: (() => {
+                    { label: "Bet Amount", value: `${betAmount} ETH` },
+                    { label: "Time Weight", value: `×${timeWeight / 100}` },
+                    { label: "Weighted Bet", value: `${(parseFloat(betAmount) * timeWeight / 100).toFixed(4)} ETH` },
+                    { label: "Current Odds", value: (() => {
                         const betPlayer = players[userBetIdx!];
                         const o = betPlayer ? getPlayerOdds(betPlayer.addr) : 0;
                         return `1 : ${(100 / Math.max(1, o)).toFixed(1)}`;
@@ -927,7 +927,7 @@ export default function SpectatorPage() {
                 </div>
               </div>
               <div style={{ marginTop: "14px", fontSize: "11px", color: "var(--brown-light)" }}>
-                比赛结束后可领取奖金
+                Winnings can be claimed after the game ends
               </div>
             </div>
           ) : (
@@ -943,7 +943,7 @@ export default function SpectatorPage() {
                   marginBottom: "6px",
                 }}>
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--brown-light)" }}>
-                    ⏱ 时间权重
+                    ⏱ Time Weight
                   </span>
                   <span style={{
                     fontSize: "14px", fontWeight: 900,
@@ -969,14 +969,14 @@ export default function SpectatorPage() {
                   }} />
                 </div>
                 <div style={{ fontSize: "10px", color: "var(--brown-light)", marginTop: "4px" }}>
-                  越早下注权重越高（最高 100，最低 10）
+                  Earlier bets get higher weight (max 100, min 10)
                 </div>
               </div>
 
               {/* Player select */}
               <div style={{ marginBottom: "14px" }}>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--brown)", marginBottom: "8px" }}>
-                  选择你看好的玩家
+                  Pick the player you back
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {players.map(p => (
@@ -1004,7 +1004,7 @@ export default function SpectatorPage() {
                           {p.ens}
                         </div>
                         <div style={{ fontSize: "10px", color: "var(--brown-light)" }}>
-                          {fmtScore(p.score)} 分 · {getPlayerOdds(p.addr).toFixed(1)}% 押注
+                          {fmtScore(p.score)} pts · {getPlayerOdds(p.addr).toFixed(1)}% bet
                         </div>
                       </div>
                       {selectedIdx === p.idx && (
@@ -1018,7 +1018,7 @@ export default function SpectatorPage() {
               {/* Amount input */}
               <div style={{ marginBottom: "14px" }}>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--brown)", marginBottom: "8px" }}>
-                  下注金额（ETH）
+                  Bet Amount (ETH)
                 </div>
                 <div style={{ position: "relative" }}>
                   <input
@@ -1072,10 +1072,10 @@ export default function SpectatorPage() {
                     borderRadius: "10px", padding: "8px 12px",
                     fontSize: "11px", color: "var(--brown-light)",
                   }}>
-                    加权注额：<strong style={{ color: "var(--brown)" }}>
+                    Weighted bet: <strong style={{ color: "var(--brown)" }}>
                       {(parseFloat(betAmount) * timeWeight / 100).toFixed(4)} ETH
                     </strong>
-                    （原始 × 权重 {timeWeight}）
+                    (amount x weight {timeWeight})
                   </div>
                 )}
               </div>
@@ -1100,14 +1100,14 @@ export default function SpectatorPage() {
                   cursor: txPending ? "wait" : "pointer",
                 }}
               >
-                {txPending ? "⏳ 交易确认中…" : "🎯 确认下注"}
+                {txPending ? "⏳ Confirming tx..." : "🎯 Confirm Bet"}
               </button>
 
               <div style={{
                 marginTop: "10px", fontSize: "10px",
                 color: "var(--brown-light)", textAlign: "center", lineHeight: 1.5,
               }}>
-                平台收取 5% 手续费 · 押中者按加权比例瓜分奖池
+                5% platform fee · Winners split the pool proportionally by weighted bets
               </div>
             </>
           )}

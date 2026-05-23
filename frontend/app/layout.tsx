@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DeepCast 🎣",
-  description: "链上钓鱼竞技平台",
+  description: "On-chain Fishing Arena",
 };
 
 export default function RootLayout({
@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="zh">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

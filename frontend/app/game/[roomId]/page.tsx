@@ -7,15 +7,15 @@ import { ethers } from "ethers";
 import { fetchRodsForOwner } from "@/lib/fishingRod";
 import { type RodData, ROD_TYPES, generateMockRods } from "@/lib/rod";
 
-// ── 游戏状态枚举 ─────────────────────────────────────────
+// ── Game state enum ──────────────────────────────────────
 type GamePhase =
-  | "waiting_cast"   // 等待抛竿
-  | "waiting_vrf"    // 等待VRF回调
-  | "reeling"        // 收竿Bar
-  | "fish_result"    // 鱼结果展示
-  | "decision"       // 决策：锁定/重投
-  | "dice_roll"      // 骰子动画
-  | "locked"         // 已锁定
+  | "waiting_cast"   // Waiting to cast
+  | "waiting_vrf"    // Waiting for VRF
+  | "reeling"        // Reeling bar
+  | "fish_result"    // Fish result
+  | "decision"       // Decision: lock in / recast
+  | "dice_roll"      // Dice animation
+  | "locked"         // Locked
 
 type Rarity = "Common" | "Rare" | "SuperRare" | "Epic" | "Legendary";
 
@@ -33,13 +33,13 @@ interface OtherPlayer {
   score: number;
 }
 
-// ── 鱼类数据库（Mock）────────────────────────────────────
+// ── Fish database (Mock) ─────────────────────────────────
 const FISH_DB: Record<Rarity, { names: string[]; emoji: string }> = {
-  Common:   { names: ["小鲫鱼", "普通鲤鱼", "小草鱼"],      emoji: "🐟" },
-  Rare:     { names: ["金鲤鱼", "鲈鱼", "鳜鱼"],            emoji: "🐠" },
-  SuperRare:{ names: ["锦鲤", "翻车鱼", "蝶尾金鱼"],        emoji: "🐡" },
-  Epic:     { names: ["龙纹锦鲤", "古代鲟鱼", "巨型鲶鱼"],  emoji: "🦈" },
-  Legendary:{ names: ["锦鲤王", "神话巨鲤", "传说龙鱼"],    emoji: "🐉" },
+  Common:   { names: ["Small Crucian", "Common Carp", "Grass Fish"],      emoji: "🐟" },
+  Rare:     { names: ["Golden Carp", "Bass", "Mandarin Fish"],            emoji: "🐠" },
+  SuperRare:{ names: ["Koi", "Sunfish", "Butterfly Goldfish"],        emoji: "🐡" },
+  Epic:     { names: ["Dragon Koi", "Ancient Sturgeon", "Giant Catfish"],  emoji: "🦈" },
+  Legendary:{ names: ["Koi King", "Mythical Carp", "Dragon Fish"],    emoji: "🐉" },
 };
 
 const RARITY_COLORS: Record<Rarity, string> = {
@@ -65,14 +65,14 @@ const STATUS_EMOJI: Record<OtherPlayer["status"], string> = {
   locked:  "✅",
 };
 
-// ── Mock 其他玩家 ─────────────────────────────────────────
+// ── Mock other players ───────────────────────────────────
 const MOCK_OTHERS: OtherPlayer[] = [
   { ens: "vitalik.eth", status: "fishing", score: 0 },
   { ens: "sakura.eth",  status: "caught",  score: 1240 },
   { ens: "moon.eth",    status: "locked",  score: 3870 },
 ];
 
-// ── 工具函数 ─────────────────────────────────────────────
+// ── Utility functions ────────────────────────────────────
 function randomFish(): FishResult {
   const rarities: Rarity[] = ["Common","Common","Common","Rare","Rare","SuperRare","Epic","Legendary"];
   const rarity = rarities[Math.floor(Math.random() * rarities.length)];
@@ -98,7 +98,7 @@ function shortenAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
-// ── 主组件 ───────────────────────────────────────────────
+// ── Main component ──────────────────────────────────────
 export default function GameScreenPage() {
   return (
     <Suspense>
@@ -134,7 +134,7 @@ function GameScreen() {
   const usableRods = activeRods.filter(rod => rod.durability > 0);
   const eligibleRods = rodSource === "wallet"
   ? usableRods.filter(rod => rod.level >= requiredRodLevel)
-  : usableRods; // demo 鱼竿全部可用
+  : usableRods; // All demo rods are available
   const selectedRod = eligibleRods.find(rod => rod.tokenId === selectedRodId) ?? null;
   const isDemoFishing = rodSource === "demo";
   const canStartFishing = selectedRod !== null || (isDemoFishing && usableRods.length > 0);
@@ -194,14 +194,14 @@ function GameScreen() {
     fetchGameData();
   }, [fetchGameData]);
 
-  // 找到 useEffect for loadOwnedRods，在 setRodSource("demo") 的地方统一处理
+  // useEffect for loadOwnedRods, unified handling at setRodSource("demo")
   useEffect(() => {
     const loadOwnedRods = async () => {
       if (!wallet.address) {
         setOwnedRods([]);
         setRodSource("demo");
         const mockRods = generateMockRods();
-        setSelectedRodId(mockRods[0]?.tokenId ?? 1); // ← 确保有默认值
+        setSelectedRodId(mockRods[0]?.tokenId ?? 1); // Ensure a default value
         return;
       }
 
@@ -222,7 +222,7 @@ function GameScreen() {
             return usable[0]!.tokenId;
           });
         } else {
-          // 钱包里没有可用鱼竿，fallback demo
+          // No usable rods in wallet, fallback to demo
           setRodSource("demo");
           const mockRods = generateMockRods();
           setSelectedRodId(mockRods[0]?.tokenId ?? 1);
@@ -261,16 +261,20 @@ function GameScreen() {
         const rarityName = RARITY_NAMES[rarity] as Rarity;
         const db = FISH_DB[rarityName] || FISH_DB.Common;
         const fishName = db.names[Math.floor(Math.random() * db.names.length)];
-        const w = Number(weight) / 10; // assuming weight is stored as x10
-        setFish({
+        const w = Number(weight) / 10;
+        const newFish = {
           name: fishName,
           rarity: rarityName,
           weight: w,
           score: Number(score),
           emoji: db.emoji,
+        };
+        setFish(newFish);
+        setPhase(prev => {
+          if (prev === "dice_roll" || prev === "waiting_vrf" || prev === "reeling") return prev;
+          setTimeout(() => setPhase("decision"), 1200);
+          return "fish_result";
         });
-        setPhase("fish_result");
-        setTimeout(() => setPhase("decision"), 1200);
       } else {
         fetchGameData();
       }
@@ -288,14 +292,15 @@ function GameScreen() {
         const mod = Number(diceModifier);
         const isBuff = mod >= 0;
         setDiceResult({
-          text: isBuff ? `加成 +${mod}%` : `减益 ${mod}%`,
+          text: isBuff ? `Buff +${mod}%` : `Debuff ${mod}%`,
           isBuff,
         });
         setBuffs(prev => [...prev, isBuff ? "⬆️" : "⬇️"]);
         setCastCount(c => c + 1);
         setTimeout(() => {
           setDiceResult(null);
-          setPhase("waiting_cast");
+          setPhase("fish_result");
+          setTimeout(() => setPhase("decision"), 1200);
         }, 2500);
       }
     };
@@ -319,27 +324,27 @@ function GameScreen() {
     };
   }, [isContractReady, roomId, getReadContract, wallet.address, fetchGameData, router]);
 
-  // 倒计时
+  // Countdown
   useEffect(() => {
     if (phase === "locked") return;
     const t = setInterval(() => setTimeLeft(p => Math.max(0, p - 1)), 1000);
     return () => clearInterval(t);
   }, [phase]);
 
-  // 抛竿
+  // Cast
   const handleCast = useCallback(async () => {
     if (phase !== "waiting_cast" || txPending) return;
 
-    // demo 模式或合约地址未配置：直接走 mock 流程，不需要鱼竿检查
+    // Demo mode or contract address not configured: go straight to mock flow, no rod check needed
     if (!isContractReady || !roomId || isDemoFishing) {
       setPhase("waiting_vrf");
       setTimeout(() => setPhase("reeling"), 1500);
       return;
     }
 
-    // 合约模式：必须有真实鱼竿
+    // Contract mode: must have a real rod
     if (!canStartFishing) {
-      alert("请先选择一把可用的鱼竿。");
+      alert("Please select a rod first.");
       return;
     }
 
@@ -358,7 +363,7 @@ function GameScreen() {
       }, 5000);
     } catch (e: unknown) {
       console.error("cast error:", e);
-      alert(e instanceof Error ? e.message : "抛竿失败");
+      alert(e instanceof Error ? e.message : "Cast failed");
       setPhase("waiting_cast");
     } finally {
       setTxPending(false);
@@ -366,7 +371,7 @@ function GameScreen() {
   }, [phase, txPending, isContractReady, roomId, getWriteContract,
       selectedRodId, canStartFishing, isDemoFishing, rodSource]);
 
-  // 收竿结果 (mock fallback for when contract events handle it)
+  // Reel result (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
     if (result === "miss") {
       setPhase("waiting_cast");
@@ -380,16 +385,12 @@ function GameScreen() {
       setPhase("fish_result");
       setTimeout(() => setPhase("decision"), 1200);
     } else {
-      // If we reach reeling in contract mode (fallback timeout),
-      // generate a local fish as placeholder
-      const f = randomFish();
-      setFish(f);
       setPhase("fish_result");
       setTimeout(() => setPhase("decision"), 1200);
     }
   }, [isContractReady]);
 
-  // 锁定
+  // Lock in
   const handleLockIn = async () => {
     if (!isContractReady || !roomId) {
       setPhase("locked");
@@ -407,19 +408,19 @@ function GameScreen() {
       setPhase("locked");
       // GameSettled event will navigate to settlement
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "锁定失败";
+      const msg = e instanceof Error ? e.message : "Lock-in failed";
       alert(msg);
     } finally {
       setTxPending(false);
     }
   };
 
-  // 重投
+  // Recast
   const handleRecast = useCallback(async () => {
     if (castCount >= 3) return;
 
     if (!canStartFishing) {
-      alert("请先选择一把可用的鱼竿。");
+      alert("Please select a rod first.");
       return;
     }
 
@@ -440,14 +441,14 @@ function GameScreen() {
       setPhase("dice_roll");
       // DiceRolled event will update the dice result
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "重投失败";
+      const msg = e instanceof Error ? e.message : "Recast failed";
       alert(msg);
     } finally {
       setTxPending(false);
     }
   }, [castCount, isContractReady, roomId, getWriteContract, recastFee, selectedRodId, canStartFishing, isDemoFishing]);
 
-  // 骰子结果 (mock fallback)
+  // Dice result (mock fallback)
   const handleDiceFinish = (buff: { text: string; isBuff: boolean }) => {
     if (!isContractReady) {
       setDiceResult(buff);
@@ -469,20 +470,32 @@ function GameScreen() {
     }}
     onClick={undefined}
     >
-      {/* 背景层 */}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes bounce-in {
+          0% { transform: scale(0.3); opacity: 0; }
+          50% { transform: scale(1.05); }
+          70% { transform: scale(0.9); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+      {/* Background */}
       <GameBackground />
 
-      {/* 顶部状态栏 */}
+      {/* Top status bar */}
       <TopBar
         castCount={castCount}
         totalPot={totalPot}
         timeLeft={timeLeft}
       />
 
-      {/* 右侧玩家状态 */}
+      {/* Player status */}
       <PlayerSidebar players={others} />
 
-      {/* 鱼竿选择 */}
+      {/* Rod selection */}
       {phase === "waiting_cast" && (
         <RodSelectionPanel
           rods={eligibleRods}
@@ -498,10 +511,10 @@ function GameScreen() {
         />
       )}
 
-      {/* 左侧 Buff 区 */}
+      {/* Buff area */}
       {buffs.length > 0 && <BuffArea buffs={buffs} />}
 
-      {/* 中央游戏区 */}
+      {/* Game area */}
       <CentralArea
         phase={phase}
         fish={fish}
@@ -513,7 +526,7 @@ function GameScreen() {
         txPending={txPending}
       />
 
-      {/* 骰子弹窗 */}
+      {/* Dice modal */}
       {phase === "dice_roll" && !isContractReady && (
         <DiceModal onFinish={handleDiceFinish} recastNumber={castCount + 1} />
       )}
@@ -524,11 +537,11 @@ function GameScreen() {
   );
 }
 
-// ── 背景组件 ─────────────────────────────────────────────
+// ── Background component ────────────────────────────────
 function GameBackground() {
   return (
     <>
-      {/* 远山 */}
+      {/* Mountains */}
       <div style={{
         position: "absolute", bottom: "38%", left: 0, right: 0,
         height: "100px",
@@ -543,13 +556,13 @@ function GameBackground() {
         clipPath: "ellipse(50% 100% at 55% 100%)",
         opacity: 0.4,
       }}/>
-      {/* 水面 */}
+      {/* Water */}
       <div style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         height: "38%",
         background: "linear-gradient(180deg, #4A9DB5 0%, #1E5F7A 100%)",
       }}/>
-      {/* 码头 */}
+      {/* Dock */}
       <div style={{
         position: "absolute",
         bottom: "38%", left: "50%",
@@ -558,7 +571,7 @@ function GameBackground() {
         background: "#8B6355",
         borderRadius: "4px 4px 0 0",
       }}/>
-      {/* 鱼线 */}
+      {/* Fishing line */}
       <div style={{
         position: "absolute",
         bottom: "38%", left: "50%",
@@ -570,7 +583,7 @@ function GameBackground() {
   );
 }
 
-// ── 顶部状态栏 ───────────────────────────────────────────
+// ── Top status bar ──────────────────────────────────────
 function TopBar({ castCount, totalPot, timeLeft }: {
   castCount: number; totalPot: number; timeLeft: number;
 }) {
@@ -589,10 +602,10 @@ function TopBar({ castCount, totalPot, timeLeft }: {
       justifyContent: "space-between",
       padding: "0 24px", zIndex: 50,
     }}>
-      {/* 轮次 */}
+      {/* Round */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <span style={{ fontSize: "13px", fontWeight: 700, color: "white", opacity: 0.8 }}>
-          第 {castCount + 1} 轮
+          Round {castCount + 1}
         </span>
         <div style={{ display: "flex", gap: "5px" }}>
           {Array.from({ length: 4 }).map((_, i) => (
@@ -608,7 +621,7 @@ function TopBar({ castCount, totalPot, timeLeft }: {
         </div>
       </div>
 
-      {/* 奖池 */}
+      {/* Prize Pool */}
       <div style={{
         background: "var(--yellow-soft)",
         borderRadius: "20px", padding: "6px 16px",
@@ -621,7 +634,7 @@ function TopBar({ castCount, totalPot, timeLeft }: {
         </span>
       </div>
 
-      {/* 倒计时 */}
+      {/* Countdown */}
       <div style={{
         display: "flex", alignItems: "center", gap: "6px",
         color: isUrgent ? "var(--coral)" : "white",
@@ -639,7 +652,7 @@ function TopBar({ castCount, totalPot, timeLeft }: {
   );
 }
 
-// ── 右侧玩家状态栏 ───────────────────────────────────────
+// ── Player status sidebar ───────────────────────────────
 function PlayerSidebar({ players }: { players: OtherPlayer[] }) {
   return (
     <div style={{
@@ -673,7 +686,7 @@ function PlayerSidebar({ players }: { players: OtherPlayer[] }) {
               </div>
             </div>
           </div>
-          {/* 模糊进度条 */}
+          {/* Progress bar */}
           <div style={{
             height: "4px", background: "#EEE", borderRadius: "2px", overflow: "hidden",
           }}>
@@ -692,7 +705,7 @@ function PlayerSidebar({ players }: { players: OtherPlayer[] }) {
   );
 }
 
-// ── 左侧 Buff 区 ─────────────────────────────────────────
+// ── Buff area ────────────────────────────────────────────
 function BuffArea({ buffs }: { buffs: string[] }) {
   return (
     <div style={{
@@ -703,7 +716,7 @@ function BuffArea({ buffs }: { buffs: string[] }) {
         fontSize: "10px", fontWeight: 700,
         color: "rgba(255,255,255,0.7)",
         marginBottom: "6px",
-      }}>本局加成</div>
+      }}>Buffs</div>
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         {buffs.map((b, i) => (
           <div key={i} style={{
@@ -762,14 +775,14 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
           borderBottom: "1px solid rgba(139,99,85,0.10)",
         }}>
           <div>
-            <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--brown)", marginBottom: "6px" }}>我的鱼竿</div>
+            <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--brown)", marginBottom: "6px" }}>My Rods</div>
             <div style={{ fontSize: "14px", color: "var(--brown-light)" }}>
-              先选一把鱼竿，再点击开始钓鱼
+              Select a rod, then click to start fishing
             </div>
             <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
               {requiredRodLevel <= 0
-                ? `本房间（${roomTier}）需要至少一把可用鱼竿`
-                : `本房间（${roomTier}）仅展示 Lv.${requiredRodLevel}+ 的可用鱼竿`}
+                ? `This room (${roomTier}) requires at least one rod`
+                : `This room (${roomTier}) only shows Lv.${requiredRodLevel}+ rods`}
             </div>
           </div>
           <div style={{ fontSize: "30px" }}>🎣</div>
@@ -787,9 +800,9 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             }}>
               {totalUsableRods > 0
                 ? requiredRodLevel <= 0
-                  ? "当前没有可用鱼竿。"
-                  : `当前没有符合等级要求（Lv.${requiredRodLevel}+）的可用鱼竿。`
-                : "当前没有可用鱼竿。下面会给你一组 demo 鱼竿，方便先体验钓鱼流程。"}
+                  ? "No rods available."
+                  : `No rods meet the level requirement (Lv.${requiredRodLevel}+).`
+                : "No rods available. Demo rods will be provided to try the fishing experience."}
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "14px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
@@ -836,7 +849,7 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
                             #{rod.tokenId} · {info.name}
                           </div>
                           <div style={{ fontSize: "12px", color: "var(--brown-light)", marginTop: "4px" }}>
-                            Lv.{rod.level} · 耐久 {rod.durability}/{rod.maxDurability}
+                            Lv.{rod.level} · HP {rod.durability}/{rod.maxDurability}
                           </div>
                         </div>
                       </div>
@@ -848,12 +861,12 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
                         borderRadius: "999px",
                         background: isSelected ? "rgba(255,123,107,0.12)" : "rgba(139,99,85,0.07)",
                       }}>
-                        {isSelected ? "已选中" : "选择"}
+                        {isSelected ? "Selected" : "Select"}
                       </div>
                     </div>
 
                     <div style={{ marginTop: "14px", fontSize: "12px", color: "var(--brown)", fontWeight: 700 }}>
-                      本局会影响
+                      Affects this game
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
                       {effectTags.map(tag => (
@@ -887,11 +900,11 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
               alignItems: "center",
             }}>
               <div>
-                当前将使用 #{selectedRod.tokenId} 号鱼竿。
-                {isDemoFishing && <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>这是 demo 鱼竿，可以直接体验完整钓鱼流程。</div>}
+                Currently using rod #{selectedRod.tokenId}.
+                {isDemoFishing && <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>This is a demo rod for the full fishing experience.</div>}
               </div>
               <div style={{ fontSize: "14px", fontWeight: 800 }}>
-                {canStartFishing ? "可开始" : "不可用"}
+                {canStartFishing ? "Ready" : "Unavailable"}
               </div>
             </div>
           )}
@@ -905,14 +918,14 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
             flexWrap: "wrap",
           }}>
             <div style={{ fontSize: "12px", color: "var(--brown-light)" }}>
-              {hasWalletRods ? "已读取钱包鱼竿" : "当前使用 demo 鱼竿数据"}
+              {hasWalletRods ? "Wallet rods loaded" : "Using demo rod data"}
             </div>
-            // RodSelectionPanel 内，找到"开始钓鱼"按钮，替换
+            // Start fishing button
             <button
               className="btn-primary"
               onClick={() => {
-                console.log("开始钓鱼 clicked, canStartFishing:", canStartFishing);
-                onStart();          // 这会调用 handleCast
+                console.log("Start Fishing clicked, canStartFishing:", canStartFishing);
+                onStart();          // This calls handleCast
               }}
               disabled={!canStartFishing}
               style={{
@@ -921,7 +934,7 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
                 cursor: canStartFishing ? "pointer" : "not-allowed",
               }}
             >
-              开始钓鱼
+              Start Fishing
             </button>
           </div>
         </div>
@@ -930,7 +943,7 @@ function RodSelectionPanel({ rods, selectedRodId, canStartFishing, isDemoFishing
   );
 }
 
-// ── 中央游戏区 ───────────────────────────────────────────
+// ── Game area ───────────────────────────────────────────
 function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recastFee, txPending }: {
   phase: GamePhase;
   fish: FishResult | null;
@@ -973,10 +986,10 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recas
         }}>
           <div style={{ fontSize: "48px", marginBottom: "8px" }}>✅</div>
           <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--brown)" }}>
-            已锁定结果！
+            Result locked!
           </div>
           <div style={{ fontSize: "13px", color: "var(--brown-light)", marginTop: "4px" }}>
-            等待其他玩家完成...
+            Waiting for other players...
           </div>
         </div>
       )}
@@ -984,11 +997,11 @@ function CentralArea({ phase, fish, onReel, onLockIn, onRecast, castCount, recas
   );
 }
 
-// ── 等待抛竿 UI ──────────────────────────────────────────
+// ── Waiting to cast UI ──────────────────────────────────
 function WaitingCastUI({ txPending }: { txPending: boolean }) {
   return (
     <div style={{ textAlign: "center" }}>
-      {/* 鱼影 */}
+      {/* Fish shadow */}
       <div style={{
         position: "relative", width: "300px", height: "120px", marginBottom: "24px",
       }}>
@@ -1009,7 +1022,7 @@ function WaitingCastUI({ txPending }: { txPending: boolean }) {
         ))}
       </div>
 
-      {/* 抛竿按钮 */}
+      {/* Cast button */}
       <div style={{
         width: "180px", height: "180px",
         borderRadius: "50%",
@@ -1027,17 +1040,17 @@ function WaitingCastUI({ txPending }: { txPending: boolean }) {
         <span style={{
           fontWeight: 800, fontSize: "15px", color: "white",
           textShadow: "0 1px 4px rgba(0,0,0,0.3)",
-        }}>{txPending ? "发送中..." : "点击抛竿"}</span>
+        }}>{txPending ? "Sending..." : "Tap to Cast"}</span>
         <span style={{
           fontSize: "11px", color: "rgba(255,255,255,0.7)",
           marginTop: "2px",
-        }}>{txPending ? "等待交易确认" : "点击画面任意位置"}</span>
+        }}>{txPending ? "Waiting for tx confirmation" : "Tap anywhere"}</span>
       </div>
     </div>
   );
 }
 
-// ── 等待 VRF UI ──────────────────────────────────────────
+// ── Waiting for VRF UI ──────────────────────────────────
 function WaitingVRFUI() {
   return (
     <div style={{ textAlign: "center" }}>
@@ -1055,14 +1068,14 @@ function WaitingVRFUI() {
           display: "flex", alignItems: "center", gap: "8px",
         }}>
           <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>🐠</span>
-          鱼儿们在考虑中...
+          Fish are thinking...
         </div>
       </div>
     </div>
   );
 }
 
-// ── 收竿 Bar ─────────────────────────────────────────────
+// ── Reeling bar ─────────────────────────────────────────
 function ReelingBar({ onResult }: {
   onResult: (r: "perfect" | "good" | "ok" | "miss") => void;
 }) {
@@ -1095,10 +1108,10 @@ function ReelingBar({ onResult }: {
     const p = posRef.current;
     let result: "perfect" | "good" | "ok" | "miss";
     let fb: string;
-    if (p >= 35 && p <= 65) { result = "perfect"; fb = "完美 ✨"; }
-    else if ((p >= 20 && p < 35) || (p > 65 && p <= 80)) { result = "good"; fb = "不错哦 👍"; }
-    else if ((p >= 10 && p < 20) || (p > 80 && p <= 90)) { result = "ok";   fb = "险险的 😅"; }
-    else { result = "miss"; fb = "哎呀空杆了 💦"; }
+    if (p >= 35 && p <= 65) { result = "perfect"; fb = "Perfect ✨"; }
+    else if ((p >= 20 && p < 35) || (p > 65 && p <= 80)) { result = "good"; fb = "Nice! 👍"; }
+    else if ((p >= 10 && p < 20) || (p > 80 && p <= 90)) { result = "ok";   fb = "Close call! 😅"; }
+    else { result = "miss"; fb = "Missed! 💦"; }
     setFeedback(fb);
     setTimeout(() => onResult(result), 900);
   }, [onResult]);
@@ -1111,7 +1124,7 @@ function ReelingBar({ onResult }: {
     return () => window.removeEventListener("keydown", handler);
   }, [handleHit]);
 
-  // 区域颜色
+  // Zone colors
   const getZoneColor = (p: number) => {
     if (p >= 35 && p <= 65) return "#4CAF50";
     if ((p >= 20 && p < 35) || (p > 65 && p <= 80)) return "#FFC107";
@@ -1134,34 +1147,34 @@ function ReelingBar({ onResult }: {
         fontSize: "13px", fontWeight: 700,
         color: "var(--brown-light)", marginBottom: "12px",
       }}>
-        咬钩啦！快按 <kbd style={{
+        Fish on! Press <kbd style={{
           background: "var(--cream)", borderRadius: "6px",
           padding: "2px 8px", border: "1px solid var(--cream-dark)",
           fontFamily: "monospace",
-        }}>Space</kbd> 或点击收竿！
+        }}>Space</kbd> or tap to reel in!
       </div>
 
-      {/* Bar 轨道 */}
+      {/* Bar track */}
       <div style={{
         position: "relative", height: "52px",
         borderRadius: "26px", overflow: "hidden",
         background: "#F44336",
         marginBottom: "12px",
       }}>
-        {/* 黄区 */}
+        {/* Yellow zone */}
         <div style={{
           position: "absolute", top: 0, bottom: 0,
           left: "20%", right: "20%",
           background: "#FFC107",
         }}/>
-        {/* 绿区 */}
+        {/* Green zone */}
         <div style={{
           position: "absolute", top: 0, bottom: 0,
           left: "35%", right: "35%",
           background: "#4CAF50",
         }}/>
 
-        {/* 小鸟指针 */}
+        {/* Bird pointer */}
         <div style={{
           position: "absolute", top: "50%",
           left: `${pos}%`,
@@ -1173,20 +1186,20 @@ function ReelingBar({ onResult }: {
         }}>🐦</div>
       </div>
 
-      {/* 区域说明 */}
+      {/* Zone labels */}
       <div style={{
         display: "flex", justifyContent: "space-between",
         fontSize: "10px", color: "var(--brown-light)", fontWeight: 600,
         marginBottom: "8px", padding: "0 4px",
       }}>
-        <span style={{ color: "#F44336" }}>危险 50%</span>
-        <span style={{ color: "#FFC107" }}>普通 80%</span>
-        <span style={{ color: "#4CAF50" }}>完美 100%</span>
-        <span style={{ color: "#FFC107" }}>普通 80%</span>
-        <span style={{ color: "#F44336" }}>危险 50%</span>
+        <span style={{ color: "#F44336" }}>Danger 50%</span>
+        <span style={{ color: "#FFC107" }}>Normal 80%</span>
+        <span style={{ color: "#4CAF50" }}>Perfect 100%</span>
+        <span style={{ color: "#FFC107" }}>Normal 80%</span>
+        <span style={{ color: "#F44336" }}>Danger 50%</span>
       </div>
 
-      {/* 反馈文字 */}
+      {/* Feedback */}
       {feedback && (
         <div style={{
           fontSize: "20px", fontWeight: 900,
@@ -1198,7 +1211,7 @@ function ReelingBar({ onResult }: {
   );
 }
 
-// ── 鱼结果卡片 ───────────────────────────────────────────
+// ── Fish result card ────────────────────────────────────
 function FishCard({ fish }: { fish: FishResult }) {
   const isLegendary = fish.rarity === "Legendary";
   return (
@@ -1216,7 +1229,7 @@ function FishCard({ fish }: { fish: FishResult }) {
       position: "relative",
       overflow: "hidden",
     }}>
-      {/* Legendary 光芒 */}
+      {/* Legendary glow */}
       {isLegendary && (
         <div style={{
           position: "absolute", top: "50%", left: "50%",
@@ -1228,14 +1241,14 @@ function FishCard({ fish }: { fish: FishResult }) {
         }}/>
       )}
 
-      {/* 鱼 emoji */}
+      {/* Fish emoji */}
       <div style={{
         fontSize: "64px", marginBottom: "8px",
         animation: "float 2s ease-in-out infinite",
         position: "relative", zIndex: 1,
       }}>{fish.emoji}</div>
 
-      {/* 稀有度标签 */}
+      {/* Rarity tag */}
       <div style={{
         display: "inline-block",
         background: `${RARITY_COLORS[fish.rarity]}20`,
@@ -1245,21 +1258,21 @@ function FishCard({ fish }: { fish: FishResult }) {
         marginBottom: "8px",
       }}>{fish.rarity}</div>
 
-      {/* 鱼名 */}
+      {/* Fish name */}
       <div style={{
         fontFamily: "var(--font-serif)",
         fontSize: "22px", fontWeight: 700,
         color: "var(--brown)", marginBottom: "16px",
       }}>{fish.name}</div>
 
-      {/* 数据 */}
+      {/* Stats */}
       <div style={{
         display: "grid", gridTemplateColumns: "1fr 1fr",
         gap: "8px",
       }}>
         {[
-          { icon: "⚖️", label: "重量", value: `${fish.weight} kg` },
-          { icon: "⭐", label: "预估分", value: `${fish.score}` },
+          { icon: "⚖️", label: "Weight", value: `${fish.weight} kg` },
+          { icon: "⭐", label: "Est. Score", value: `${fish.score}` },
         ].map(item => (
           <div key={item.label} style={{
             background: "rgba(255,255,255,0.6)",
@@ -1279,7 +1292,7 @@ function FishCard({ fish }: { fish: FishResult }) {
   );
 }
 
-// ── 决策按钮 ─────────────────────────────────────────────
+// ── Decision buttons ────────────────────────────────────
 function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }: {
   onLockIn: () => void;
   onRecast: () => void;
@@ -1300,7 +1313,7 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }
         borderRadius: "16px", minWidth: "140px",
         opacity: txPending ? 0.6 : 1,
       }}>
-        {txPending ? "确认中..." : "今天就钓这条！✨"}
+        {txPending ? "Confirming..." : "Keep this catch! ✨"}
       </button>
 
       {canRecast && (
@@ -1309,7 +1322,7 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }
           borderRadius: "16px", minWidth: "140px",
           opacity: txPending ? 0.6 : 1,
         }}>
-          <div>{txPending ? "确认中..." : "再试一次 🎣"}</div>
+          <div>{txPending ? "Confirming..." : "Try again 🎣"}</div>
           <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>
             +{recastFee} ETH
           </div>
@@ -1319,7 +1332,7 @@ function DecisionButtons({ onLockIn, onRecast, castCount, recastFee, txPending }
   );
 }
 
-// ── 骰子弹窗 (Mock fallback) ────────────────────────────
+// ── Dice modal (Mock fallback) ──────────────────────────
 function DiceModal({ onFinish, recastNumber }: {
   onFinish: (buff: { text: string; isBuff: boolean }) => void;
   recastNumber: number;
@@ -1328,12 +1341,12 @@ function DiceModal({ onFinish, recastNumber }: {
   const [result, setResult] = useState<{ text: string; isBuff: boolean } | null>(null);
 
   const BUFFS = [
-    { text: "稀有度概率 +20%", isBuff: true },
-    { text: "重量加成 +25%", isBuff: true },
-    { text: "时间系数提升", isBuff: true },
-    { text: "必出 Rare 以上！", isBuff: true },
-    { text: "稀有度降级", isBuff: false },
-    { text: "时间罚时 -10s", isBuff: false },
+    { text: "Rarity chance +20%", isBuff: true },
+    { text: "Weight bonus +25%", isBuff: true },
+    { text: "Time coefficient boost", isBuff: true },
+    { text: "Guaranteed Rare+!", isBuff: true },
+    { text: "Rarity downgrade", isBuff: false },
+    { text: "Time penalty -10s", isBuff: false },
   ];
 
   useEffect(() => {
@@ -1367,7 +1380,7 @@ function DiceModal({ onFinish, recastNumber }: {
           color: "var(--brown-light)", marginBottom: "16px",
           textTransform: "uppercase", letterSpacing: "0.08em",
         }}>
-          第 {recastNumber} 次重投骰子
+          Recast Dice #{recastNumber}
         </div>
 
         {stage === "rolling" ? (
@@ -1376,7 +1389,7 @@ function DiceModal({ onFinish, recastNumber }: {
             <div style={{
               marginTop: "16px", fontSize: "14px",
               color: "var(--brown-light)", fontWeight: 600,
-            }}>命运的骰子滚动中...</div>
+            }}>Rolling the dice of fate...</div>
           </>
         ) : result ? (
           <>
@@ -1393,7 +1406,7 @@ function DiceModal({ onFinish, recastNumber }: {
               fontSize: "12px", color: "var(--brown-light)",
               marginTop: "8px",
             }}>
-              {result.isBuff ? "好运降临！✨" : "运气不佳，但还能逆风翻盘！"}
+              {result.isBuff ? "Lucky break! ✨" : "Bad luck, but you can turn it around!"}
             </div>
           </>
         ) : null}
@@ -1402,7 +1415,7 @@ function DiceModal({ onFinish, recastNumber }: {
   );
 }
 
-// ── 骰子弹窗 (Contract mode - waits for DiceRolled event) ──
+// ── Dice modal (Contract mode - waits for DiceRolled event) ──
 function DiceModalContract({ diceResult, recastNumber }: {
   diceResult: { text: string; isBuff: boolean } | null;
   recastNumber: number;
@@ -1426,7 +1439,7 @@ function DiceModalContract({ diceResult, recastNumber }: {
           color: "var(--brown-light)", marginBottom: "16px",
           textTransform: "uppercase", letterSpacing: "0.08em",
         }}>
-          第 {recastNumber} 次重投骰子
+          Recast Dice #{recastNumber}
         </div>
 
         {!diceResult ? (
@@ -1435,7 +1448,7 @@ function DiceModalContract({ diceResult, recastNumber }: {
             <div style={{
               marginTop: "16px", fontSize: "14px",
               color: "var(--brown-light)", fontWeight: 600,
-            }}>命运的骰子滚动中...</div>
+            }}>Rolling the dice of fate...</div>
           </>
         ) : (
           <>
@@ -1452,7 +1465,7 @@ function DiceModalContract({ diceResult, recastNumber }: {
               fontSize: "12px", color: "var(--brown-light)",
               marginTop: "8px",
             }}>
-              {diceResult.isBuff ? "好运降临！✨" : "运气不佳，但还能逆风翻盘！"}
+              {diceResult.isBuff ? "Lucky break! ✨" : "Bad luck, but you can turn it around!"}
             </div>
           </>
         )}

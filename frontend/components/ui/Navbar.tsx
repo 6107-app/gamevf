@@ -22,7 +22,7 @@ export default function Navbar({ walletAddress, isConnecting, onConnect }: Navba
       // No-op in standalone mode since we can't set parent state
       void accounts;
     } else {
-      alert("请安装 MetaMask 🦊");
+      alert("Please install MetaMask 🦊");
     }
   };
 
@@ -60,7 +60,7 @@ export default function Navbar({ walletAddress, isConnecting, onConnect }: Navba
         }}>DeepCast</span>
       </div>
 
-      {/* 钱包按钮 */}
+      {/* Wallet button */}
       {connected ? (
         <div style={{
           display: "flex", alignItems: "center", gap: "10px",
@@ -80,7 +80,7 @@ export default function Navbar({ walletAddress, isConnecting, onConnect }: Navba
         <button className="btn-primary" onClick={handleConnect}
           disabled={isConnecting}
           style={{ padding: "10px 20px", fontSize: "14px", opacity: isConnecting ? 0.7 : 1 }}>
-          {isConnecting ? "连接中..." : "连接钱包 🎣"}
+          {isConnecting ? "Connecting..." : "Connect Wallet 🎣"}
         </button>
       )}
     </nav>

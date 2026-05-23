@@ -64,7 +64,7 @@ export default function RoomCard({
       (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-card)";
     }}>
 
-      {/* 等级图标 */}
+      {/* Tier icon */}
       <div style={{
         width: "60px", height: "60px",
         background: TIER_BG[tier],
@@ -76,7 +76,7 @@ export default function RoomCard({
         {TIER_ICONS[tier]}
       </div>
 
-      {/* 房间信息 */}
+      {/* Room info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
           <span style={{ fontWeight: 800, fontSize: "15px", color: "var(--brown)" }}>
@@ -106,18 +106,18 @@ export default function RoomCard({
                 borderRadius: "50%",
                 display: "inline-block",
               }}/>
-              直播
+              LIVE
             </span>
           )}
         </div>
 
-        {/* 入场费 + 人数 */}
+        {/* Entry fee + players */}
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
           <span style={{
             fontWeight: 800, fontSize: "17px", color: "var(--brown)",
           }}>{entryFee} ETH</span>
 
-          {/* 鱼图标人数 */}
+          {/* Fish player icons */}
           <div style={{ display: "flex", gap: "4px" }}>
             {Array.from({ length: 4 }).map((_, i) => (
               <span key={i} style={{
@@ -128,12 +128,12 @@ export default function RoomCard({
             ))}
           </div>
           <span style={{ fontSize: "12px", color: "var(--brown-light)", fontWeight: 600 }}>
-            {playerCount}/4 人
+            {playerCount}/4
           </span>
         </div>
       </div>
 
-      {/* 操作按钮 */}
+      {/* Action button */}
       <div style={{ flexShrink: 0 }}>
         {isFull ? (
           <button style={{
@@ -145,7 +145,7 @@ export default function RoomCard({
             fontWeight: 700,
             fontSize: "13px",
             cursor: "not-allowed",
-          }}>已满</button>
+          }}>Full</button>
         ) : isLivestream ? (
           <button onClick={onWatch} style={{
             background: "#FFF0F0",
@@ -156,11 +156,11 @@ export default function RoomCard({
             fontWeight: 700,
             fontSize: "13px",
             cursor: "pointer",
-          }}>👁 观看</button>
+          }}>👁 Watch</button>
         ) : (
           <button onClick={onJoin} className="btn-primary"
             style={{ padding: "10px 18px", fontSize: "13px" }}>
-            加入
+            Join
           </button>
         )}
       </div>

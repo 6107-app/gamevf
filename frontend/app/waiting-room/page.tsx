@@ -45,7 +45,7 @@ function WaitingRoom() {
 
   const [players, setPlayers] = useState<PlayerData[]>(MOCK_PLAYERS);
   const [roomTier, setRoomTier] = useState<RoomTier>("Bronze");
-  const [roomName, setRoomName] = useState("芦苇湾 3号");
+  const [roomName, setRoomName] = useState("Reed Bay #3");
   const [pot, setPot] = useState(0.02);
   const [entryFee, setEntryFee] = useState(0.01);
   const [hostAddress, setHostAddress] = useState<string>("");
@@ -67,7 +67,7 @@ function WaitingRoom() {
       const totalPot = ethers.formatEther(info.totalPot);
 
       setRoomTier(tier);
-      setRoomName(`${tier} 房间 #${roomId}`);
+      setRoomName(`${tier} Room #${roomId}`);
       setPot(parseFloat(totalPot));
       setEntryFee(parseFloat(fee));
       setHostAddress(info.host);
@@ -147,14 +147,14 @@ function WaitingRoom() {
       await tx.wait();
       router.push(`/game/${roomId}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "开始失败";
+      const msg = e instanceof Error ? e.message : "Failed to start";
       alert(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // 水面气泡
+  // Water surface bubbles
   const [bubbles, setBubbles] = useState<{ id: number; x: number; delay: number }[]>([]);
   useEffect(() => {
     const interval = setInterval(() => {
@@ -188,7 +188,7 @@ function WaitingRoom() {
         onConnect={wallet.connect}
       />
 
-      {/* 背景装饰：远山 */}
+      {/* Background: distant mountains */}
       <div style={{
         position: "absolute", bottom: "30%", left: 0, right: 0,
         height: "120px",
@@ -197,7 +197,7 @@ function WaitingRoom() {
         opacity: 0.6,
       }}/>
 
-      {/* 水面 */}
+      {/* Water surface */}
       <div style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         height: "35%",
@@ -205,7 +205,7 @@ function WaitingRoom() {
         opacity: 0.85,
       }}/>
 
-      {/* 气泡 */}
+      {/* Bubbles */}
       {bubbles.map(b => (
         <div key={b.id} style={{
           position: "absolute",
@@ -218,7 +218,7 @@ function WaitingRoom() {
         }}/>
       ))}
 
-      {/* 主卡片 */}
+      {/* Main card */}
       <div style={{
         position: "absolute",
         top: "50%", left: "50%",
@@ -246,16 +246,16 @@ function WaitingRoom() {
             color: "var(--brown)",
           }}
         >
-          ← 返回大厅
+          ← Back to Lobby
         </button>
 
-        {/* 标题 */}
+        {/* Title */}
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
           <div style={{
             fontSize: "24px", fontWeight: 800,
             color: "var(--brown)",
             fontFamily: "var(--font-serif)",
-          }}>等待其他小钓手 🎣</div>
+          }}>Waiting for Anglers 🎣</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginTop: "6px" }}>
             <span style={{ fontSize: "13px", color: "var(--brown-light)", fontWeight: 600 }}>
               {roomName}
@@ -269,7 +269,7 @@ function WaitingRoom() {
           </div>
         </div>
 
-        {/* 玩家槽位 */}
+        {/* Player slots */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
           {players.map((player, i) => (
             <PlayerSlot
@@ -282,7 +282,7 @@ function WaitingRoom() {
           ))}
         </div>
 
-        {/* 分割线 + 奖池 */}
+        {/* Divider + prize pool */}
         <div style={{
           height: "1px", background: "var(--cream-dark)", margin: "4px 0 16px",
         }}/>
@@ -291,7 +291,7 @@ function WaitingRoom() {
           gap: "8px", marginBottom: "20px",
         }}>
           <span style={{ fontSize: "13px", color: "var(--brown-light)", fontWeight: 600 }}>
-            当前奖池
+            Current Prize Pool
           </span>
           <span style={{
             background: "var(--yellow-soft)",
@@ -304,11 +304,11 @@ function WaitingRoom() {
             💰 {pot.toFixed(2)} ETH
           </span>
           <span style={{ fontSize: "12px", color: "var(--brown-light)" }}>
-            满员后 {maxPot.toFixed(3)} ETH
+            Full: {maxPot.toFixed(3)} ETH
           </span>
         </div>
 
-        {/* 按钮区 */}
+        {/* Buttons */}
         {isHost ? (
           <div>
             <button
@@ -323,14 +323,14 @@ function WaitingRoom() {
                 animation: canStart && !loading ? "pulse-glow 2s ease-in-out infinite" : "none",
               }}
             >
-              {loading ? "等待链上确认..." : "开始游戏 ▶"}
+              {loading ? "Waiting for on-chain confirmation..." : "Start Game ▶"}
             </button>
             {!canStart && (
               <div style={{
                 textAlign: "center", marginTop: "8px",
                 fontSize: "12px", color: "var(--brown-light)",
               }}>
-                至少需要 2 名玩家才能开始
+                At least 2 players needed to start
               </div>
             )}
           </div>
@@ -344,7 +344,7 @@ function WaitingRoom() {
               display: "inline-block",
               animation: "spin 1.5s linear infinite",
             }}>⏳</span>
-            等待房主开始游戏...
+            Waiting for host to start...
           </div>
         )}
       </div>
@@ -372,7 +372,7 @@ function WaitingRoom() {
   );
 }
 
-// ── 玩家槽位组件 ─────────────────────────────────────────
+// ── Player slot component ─────────────────────────────────────────
 function PlayerSlot({
   player, index, isMe, isHostSlot,
 }: {
@@ -410,14 +410,14 @@ function PlayerSlot({
                 background: "var(--coral)", color: "white",
                 borderRadius: "6px", padding: "1px 6px",
                 fontSize: "10px", fontWeight: 700,
-              }}>你</span>
+              }}>You</span>
             )}
             {isHostSlot && (
               <span style={{
                 background: "var(--yellow-soft)", color: "#C8A020",
                 borderRadius: "6px", padding: "1px 6px",
                 fontSize: "10px", fontWeight: 700,
-              }}>房主</span>
+              }}>Host</span>
             )}
           </div>
           <div style={{
@@ -455,7 +455,7 @@ function PlayerSlot({
       </div>
       <span style={{
         fontSize: "13px", color: "#CCC", fontWeight: 600,
-      }}>等待中...</span>
+      }}>Waiting...</span>
     </div>
   );
 }

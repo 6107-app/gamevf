@@ -1,5 +1,5 @@
 /**
- * 鱼竿系统数据模型与常量
+ * Rod system data models and constants
  */
 export type RodType = "Driftwood" | "Tidebreaker" | "Leviathan" | "AbyssWhisper";
 export type Rarity = "Common" | "Rare" | "SuperRare" | "Epic" | "Legendary";
@@ -28,24 +28,24 @@ export interface RodData {
 
 export const ROD_TYPES: Record<RodType, { name: string; icon: string; description: string }> = {
   Driftwood: {
-    name: "Driftwood Rod（流木竿）",
+    name: "Driftwood Rod",
     icon: "🎣",
-    description: "common 级鱼竿，起始价格 0.01 ETH，初始属性为 Speed +3% / Weight +3%",
+    description: "Common rod, 0.01 ETH, base stats: Speed +3% / Weight +3%",
   },
   Tidebreaker: {
-    name: "Tidebreaker Rod（破潮竿）",
+    name: "Tidebreaker Rod",
     icon: "⚡",
-    description: "rare 级鱼竿，起始价格 0.05 ETH，初始属性为 Speed +10% / Weight +2%",
+    description: "Rare rod, 0.05 ETH, base stats: Speed +10% / Weight +2%",
   },
   Leviathan: {
-    name: "Leviathan Rod（海兽竿）",
+    name: "Leviathan Rod",
     icon: "💪",
-    description: "super rare 级鱼竿，起始价格 0.08 ETH，初始属性为 Luck +5% / Stability +2%",
+    description: "Super Rare rod, 0.08 ETH, base stats: Luck +5% / Stability +2%",
   },
   AbyssWhisper: {
-    name: "Abyss Whisper Rod（深渊低语）",
+    name: "Abyss Whisper Rod",
     icon: "✨",
-    description: "epic 级鱼竿，起始价格 0.15 ETH，初始属性为 Luck +10% / Stability +5%",
+    description: "Epic rod, 0.15 ETH, base stats: Luck +10% / Stability +5%",
   },
 };
 

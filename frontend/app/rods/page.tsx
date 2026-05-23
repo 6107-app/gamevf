@@ -102,10 +102,10 @@ export default function RodsHallPage() {
               fontWeight: 700,
               color: "var(--brown)",
             }}>
-              🎣 我的鱼竿库
+              My Rod Collection
             </div>
             <div>
-              <button className="btn-secondary" onClick={() => window.location.href = '/'}>返回大厅</button>
+              <button className="btn-secondary" onClick={() => window.location.href = '/'}>Back to Lobby</button>
             </div>
           </div>
           <p style={{
@@ -114,8 +114,8 @@ export default function RodsHallPage() {
             lineHeight: "1.6",
           }}>
             {requiredTier
-              ? `${requiredTier} 房间需要等级 ${requiredLevel} 及以上的鱼竿。点击任意鱼竿进入房间。`
-              : "展示你拥有的所有鱼竿。点击任意鱼竿查看详情、升级或维护它们。"}
+              ? `${requiredTier} rooms require a rod at level ${requiredLevel} or above. Click any rod to enter the room.`
+              : "View all your rods. Click any rod to see details, upgrade, or repair."}
           </p>
         </div>
 
@@ -152,7 +152,7 @@ export default function RodsHallPage() {
                 }
               }}
             >
-              {type === "All" ? "全部" : ROD_TYPES[type as keyof typeof ROD_TYPES].name}
+              {type === "All" ? "All" : ROD_TYPES[type as keyof typeof ROD_TYPES].name}
             </button>
           ))}
         </div>
@@ -166,13 +166,13 @@ export default function RodsHallPage() {
           }}>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>🎣</div>
             <p style={{ fontSize: "15px", marginBottom: "16px" }}>
-              {wallet.address ? requiredTier 
-                ? `没有等级 ${requiredLevel} 以上的鱼竿` 
-                : "暂无此类鱼竿" 
-                : "请先连接钱包"}
+              {wallet.address ? requiredTier
+                ? `No rods at level ${requiredLevel} or above`
+                : "No rods of this type"
+                : "Please connect your wallet first"}
             </p>
             <button className="btn-primary" onClick={() => setFilterType("All")}>
-              查看所有鱼竿
+              View All Rods
             </button>
           </div>
         ) : (
@@ -204,7 +204,7 @@ export default function RodsHallPage() {
             color: "var(--brown)",
             marginBottom: "16px",
           }}>
-            🛍️ 购买新鱼竿
+            Purchase New Rod
           </div>
           <p style={{
             fontSize: "13px",
@@ -212,7 +212,7 @@ export default function RodsHallPage() {
             marginBottom: "20px",
             lineHeight: "1.6",
           }}>
-            你还没有其他类型的鱼竿？现在可以购买一把新的鱼竿来拓展你的收集。
+            Don't have other rod types yet? Purchase a new rod to expand your collection.
           </p>
 
           <div style={{
@@ -273,30 +273,30 @@ export default function RodsHallPage() {
                             : new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
                           if (SIMULATE) {
                             const sim = await simulateMint(idx, provider);
-                            alert(`模拟铸造：价格 ${ethers.formatEther(sim.price)} ETH，估算 gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}`);
+                            alert(`Simulate mint: price ${ethers.formatEther(sim.price)} ETH, est. gas ${sim.gasEstimate ? sim.gasEstimate.toString() : 'n/a'}`);
                             return;
                           }
-                          if (!(window as any).ethereum) return alert('请安装钱包');
+                          if (!(window as any).ethereum) return alert('Please install a wallet');
                           const web3 = new ethers.BrowserProvider((window as any).ethereum);
                           await web3.send('eth_requestAccounts', []);
                           const signer = await web3.getSigner();
                           const tx = await mintRodOnChain(idx, signer);
-                          alert('交易已发出，等待上链');
+                          alert('Transaction sent, waiting for confirmation');
                           await tx.wait();
-                          alert('铸造成功');
+                          alert('Minting successful');
                           await loadOwnedRods();
                         } catch (e: any) {
                           console.error(e);
                           const code = e?.code || e?.error?.code;
                           if (code === 4001) {
-                            alert('用户已拒绝交易签名');
+                            alert('Transaction signature rejected by user');
                           } else {
-                            alert('交易失败');
+                            alert('Transaction failed');
                           }
                         }
                       }}
                     >
-                      购买 - {mintPrices[idx] ? `${ethers.formatEther(mintPrices[idx])} ETH` : '加载中...'}
+                      Buy - {mintPrices[idx] ? `${ethers.formatEther(mintPrices[idx])} ETH` : 'Loading...'}
                     </button>
                   )}
                   {hasRod && (
@@ -309,7 +309,7 @@ export default function RodsHallPage() {
                       fontWeight: 600,
                       textAlign: "center",
                     }}>
-                      ✓ 已拥有
+                      ✓ Owned
                     </div>
                   )}
                 </div>
