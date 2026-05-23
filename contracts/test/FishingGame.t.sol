@@ -95,6 +95,11 @@ contract FishingGameTest is Test {
         );
         game.setRodContract(address(mockRod));
 
+        mockRod.setOwner(1, host);
+        mockRod.setOwner(2, player2);
+        mockRod.setOwner(3, player3);
+        mockRod.setOwner(4, player4);
+
         vm.deal(host, 10 ether);
         vm.deal(player2, 10 ether);
         vm.deal(player3, 10 ether);

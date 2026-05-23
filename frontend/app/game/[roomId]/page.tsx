@@ -136,6 +136,12 @@ function GameScreen() {
   const selectedRod = eligibleRods.find(rod => rod.tokenId === selectedRodId) ?? null;
   const canStartFishing = selectedRod !== null;
   const isDemoFishing = rodSource === "demo";
+  const pendingFishRef = useRef<FishResult | null>(null);
+  const phaseRef = useRef<GamePhase>(phase);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // Fetch room data from contract (pot, recast fee, other players)
   const fetchGameData = useCallback(async () => {
@@ -251,15 +257,24 @@ function GameScreen() {
         const db = FISH_DB[rarityName] || FISH_DB.Common;
         const fishName = db.names[Math.floor(Math.random() * db.names.length)];
         const w = Number(weight) / 10; // assuming weight is stored as x10
-        setFish({
+        const fishData: FishResult = {
           name: fishName,
           rarity: rarityName,
           weight: w,
           score: Number(score),
           emoji: db.emoji,
-        });
-        setPhase("fish_result");
-        setTimeout(() => setPhase("decision"), 1200);
+        };
+        pendingFishRef.current = fishData;
+        const p = phaseRef.current;
+        if (p === "waiting_vrf" || p === "waiting_cast") {
+          setPhase("reeling");
+        } else if (p === "reeling") {
+        } else {
+          pendingFishRef.current = null;
+          setFish(fishData);
+          setPhase("fish_result");
+          setTimeout(() => setPhase("decision"), 1200);
+        }
       } else {
         fetchGameData();
       }
@@ -336,6 +351,7 @@ function GameScreen() {
 
     setTxPending(true);
     setPhase("waiting_vrf");
+    pendingFishRef.current = null;
     try {
       const tx = await contract.cast(Number(roomId), selectedRodId || 0);
       await tx.wait();
@@ -354,7 +370,7 @@ function GameScreen() {
 
   // 收竿结果 (mock fallback for when contract events handle it)
   const handleReel = useCallback((result: "perfect" | "good" | "ok" | "miss") => {
-    if (result === "miss") {
+    if (result === "miss" && !pendingFishRef.current) {
       setPhase("waiting_cast");
       return;
     }
@@ -366,9 +382,8 @@ function GameScreen() {
       setPhase("fish_result");
       setTimeout(() => setPhase("decision"), 1200);
     } else {
-      // If we reach reeling in contract mode (fallback timeout),
-      // generate a local fish as placeholder
-      const f = randomFish();
+      const f = pendingFishRef.current ?? randomFish();
+      pendingFishRef.current = null;
       setFish(f);
       setPhase("fish_result");
       setTimeout(() => setPhase("decision"), 1200);
@@ -1091,6 +1106,11 @@ function ReelingBar({ onResult }: {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, [handleHit]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => handleHit(), 3500);
+    return () => window.clearTimeout(t);
   }, [handleHit]);
 
   // 区域颜色

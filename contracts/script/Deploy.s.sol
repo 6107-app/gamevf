@@ -23,8 +23,9 @@ contract Deploy is Script {
             1
         );
 
-        // 让 FishingGame 知道 FishingRod 的地址
+        // Wiring: both contracts must know each other
         game.setRodContract(address(rod));
+        rod.setGameContract(address(game));
 
         console.log("VRF:", address(vrf));
         console.log("FishingGame:", address(game));
