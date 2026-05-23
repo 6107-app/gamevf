@@ -1,10 +1,10 @@
 export default function AnnouncementBar() {
   const announcements = [
-    "🎣 vitalik.eth 刚刚钓到了传说级 锦鲤王！重达 18.4kg ✨",
-    "🏆 芦苇湾3号 房间已结算，sakura.eth 以 2847分 夺冠！",
-    "🐟 今日已有 128 场比赛完成，共钓出 6 条 Legendary 鱼",
-    "🎁 邀请好友参赛可获得入场费 5% 返佣，快去分享吧！",
-    "⚡ Gold 房间新开！入场费 0.1 ETH，快来挑战高手！",
+    "🎣 vitalik.eth just caught a Legendary Koi King! Weight: 18.4kg ✨",
+    "🏆 Room Reed Bay #3 settled — sakura.eth wins with 2847 points!",
+    "🐟 128 matches completed today, with 6 Legendary fish caught in total",
+    "🎁 Invite friends to earn 5% referral bonus on entry fees — share now!",
+    "⚡ New Gold room open! Entry fee 0.1 ETH — come challenge the best!",
   ];
 
   const text = announcements.join("　　　　");

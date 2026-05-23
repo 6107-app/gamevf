@@ -19,11 +19,11 @@ interface PlayerResult {
 }
 
 const FISH_NAMES: Record<string, string[]> = {
-  Common:    ["小鲫鱼", "普通鲤鱼", "小草鱼"],
-  Rare:      ["金鲤鱼", "鲈鱼", "鳜鱼"],
-  SuperRare: ["锦鲤", "翻车鱼", "蝶尾金鱼"],
-  Epic:      ["龙纹锦鲤", "古代鲟鱼", "巨型鲶鱼"],
-  Legendary: ["锦鲤王", "神话巨鲤", "传说龙鱼"],
+  Common:    ["Crucian Carp", "Common Carp", "Grass Carp"],
+  Rare:      ["Golden Carp", "Sea Bass", "Mandarin Fish"],
+  SuperRare: ["Koi", "Ocean Sunfish", "Butterfly Goldfish"],
+  Epic:      ["Dragon Koi", "Ancient Sturgeon", "Giant Catfish"],
+  Legendary: ["Koi King", "Mythic Leviathan", "Dragon Fish"],
 };
 
 const FISH_EMOJI: Record<string, string> = {
@@ -31,10 +31,10 @@ const FISH_EMOJI: Record<string, string> = {
 };
 
 const MOCK_RESULTS: PlayerResult[] = [
-  { rank: 1, address: "", ens: "moon.eth",    emoji: "🐡", fishName: "锦鲤王",   fishEmoji: "🐉", rarity: "Legendary", score: 3870, prize: 0.0228, isMe: false },
-  { rank: 2, address: "", ens: "你",          emoji: "🐠", fishName: "龙纹锦鲤", fishEmoji: "🦈", rarity: "Epic",      score: 2140, prize: 0.0095, isMe: true  },
-  { rank: 3, address: "", ens: "sakura.eth",  emoji: "🐟", fishName: "金鲤鱼",   fishEmoji: "🐠", rarity: "Rare",      score: 1240, prize: 0.0038, isMe: false },
-  { rank: 4, address: "", ens: "vitalik.eth", emoji: "🐡", fishName: "小鲫鱼",   fishEmoji: "🐟", rarity: "Common",    score: 320,  prize: 0,      isMe: false },
+  { rank: 1, address: "", ens: "moon.eth",    emoji: "🐡", fishName: "Koi King",        fishEmoji: "🐉", rarity: "Legendary", score: 3870, prize: 0.0228, isMe: false },
+  { rank: 2, address: "", ens: "You",         emoji: "🐠", fishName: "Dragon Koi",      fishEmoji: "🦈", rarity: "Epic",      score: 2140, prize: 0.0095, isMe: true  },
+  { rank: 3, address: "", ens: "sakura.eth",  emoji: "🐟", fishName: "Golden Carp",     fishEmoji: "🐠", rarity: "Rare",      score: 1240, prize: 0.0038, isMe: false },
+  { rank: 4, address: "", ens: "vitalik.eth", emoji: "🐡", fishName: "Crucian Carp",    fishEmoji: "🐟", rarity: "Common",    score: 320,  prize: 0,      isMe: false },
 ];
 
 const RANK_STYLES = [
@@ -45,8 +45,8 @@ const RANK_STYLES = [
 ];
 
 const ACHIEVEMENTS = [
-  { icon: "🎣", label: "首次参赛", desc: "完成第一场比赛" },
-  { icon: "🐠", label: "普通鱼猎家", desc: "钓到 Common 鱼" },
+  { icon: "🎣", label: "First Game", desc: "Completed your first match" },
+  { icon: "🐠", label: "Common Angler", desc: "Caught a Common fish" },
 ];
 
 function shortenAddress(addr: string) {
@@ -77,7 +77,7 @@ function LoadingScreen() {
     }}>
       <div style={{ textAlign: "center", color: "white" }}>
         <div style={{ fontSize: "48px", marginBottom: "16px" }}>🐠</div>
-        <div style={{ fontSize: "18px", fontWeight: 700 }}>计算渔获中...</div>
+        <div style={{ fontSize: "18px", fontWeight: 700 }}>Calculating catch...</div>
       </div>
     </div>
   );
@@ -224,7 +224,7 @@ function Settlement() {
           fontFamily: "var(--font-serif)", fontSize: "32px", fontWeight: 700,
           color: "white", textShadow: "0 2px 12px rgba(0,0,0,0.15)",
           animation: "bounce-in 0.6s ease 0.2s both",
-        }}>今日渔获</h1>
+        }}>Today's Catch</h1>
 
         {/* 数据来源标签 */}
         <div style={{
@@ -243,8 +243,8 @@ function Settlement() {
             color: "white", opacity: 0.9,
           }}>
             {dataSource === "real"
-              ? `链上真实数据 · 房间 #${roomId}`
-              : "演示数据（未连接钱包）"}
+              ? `On-chain data · Room #${roomId}`
+              : "Demo data (wallet not connected)"}
           </span>
         </div>
       </div>
@@ -313,7 +313,7 @@ function Settlement() {
                       background: "var(--coral)", color: "white",
                       borderRadius: "6px", padding: "1px 6px",
                       fontSize: "10px", fontWeight: 700,
-                    }}>你</span>
+                    }}>You</span>
                   )}
                 </div>
                 <div style={{
@@ -339,7 +339,7 @@ function Settlement() {
               {/* 分数 */}
               <div style={{ textAlign: "center", minWidth: "60px" }}>
                 <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
-                  总分
+                  Score
                 </div>
                 <div style={{ fontSize: "18px", fontWeight: 900, color: "var(--brown)" }}>
                   {p.score}
@@ -351,7 +351,7 @@ function Settlement() {
                 {p.prize > 0 ? (
                   <>
                     <div style={{ fontSize: "10px", color: "var(--brown-light)", fontWeight: 600 }}>
-                      奖励
+                      Reward
                     </div>
                     <div style={{
                       fontSize: "18px", fontWeight: 900,
@@ -361,7 +361,7 @@ function Settlement() {
                   </>
                 ) : (
                   <div style={{ fontSize: "12px", color: "#BBB", fontWeight: 600, lineHeight: 1.4 }}>
-                    今天鱼运<br/>不佳 🎣
+                    Better luck<br/>next time 🎣
                   </div>
                 )}
               </div>
@@ -375,7 +375,7 @@ function Settlement() {
         textAlign: "center", marginTop: "16px",
         fontSize: "12px", color: "rgba(255,255,255,0.7)", fontWeight: 600,
       }}>
-        本局平台手续费 {platformFee.toFixed(4)} ETH，感谢支持我们继续做下去 🙏
+        Platform fee this round: {platformFee.toFixed(4)} ETH — thank you for your support 🙏
       </div>
 
       {/* 成就 */}
@@ -386,7 +386,7 @@ function Settlement() {
         }}>
           <div className="card" style={{ padding: "20px" }}>
             <div style={{ fontWeight: 800, fontSize: "14px", color: "var(--brown)", marginBottom: "12px" }}>
-              🏅 本局解锁
+              🏅 Unlocked This Round
             </div>
             <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
               {ACHIEVEMENTS.map((a, i) => (
@@ -420,12 +420,12 @@ function Settlement() {
         <button className="btn-primary"
           onClick={() => router.push("/create-room")}
           style={{ flex: 1, height: "52px", fontSize: "15px", borderRadius: "16px" }}>
-          再来一局！🎣
+          Play Again! 🎣
         </button>
         <button className="btn-secondary"
           onClick={() => router.push("/")}
           style={{ flex: 1, height: "52px", fontSize: "15px", borderRadius: "16px" }}>
-          回到大厅
+          Back to Lobby
         </button>
       </div>
 

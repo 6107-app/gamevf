@@ -51,7 +51,7 @@ export function useWallet() {
 
   const connect = useCallback(async () => {
     if (typeof window === "undefined" || !window.ethereum) {
-      setState((s) => ({ ...s, error: "请安装 MetaMask" }));
+      setState((s) => ({ ...s, error: "Please install MetaMask" }));
       return;
     }
 
@@ -83,13 +83,13 @@ export function useWallet() {
         provider,
         chainId,
         isConnecting: false,
-        error: chainId !== TARGET_CHAIN_ID ? `当前网络不是 ${TARGET_CHAIN_ID}` : null,
+        error: chainId !== TARGET_CHAIN_ID ? `Current network is not chain ${TARGET_CHAIN_ID}` : null,
       });
     } catch (e: unknown) {
       const msg =
         (e as { shortMessage?: string; message?: string })?.shortMessage ||
         (e as { message?: string })?.message ||
-        "连接失败";
+        "Connection failed";
       setState((s) => ({ ...s, isConnecting: false, error: msg }));
     }
   }, []);

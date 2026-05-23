@@ -25,10 +25,10 @@ const TIERS: {
   bg: string;
   desc: string;
 }[] = [
-  { tier: "Bronze", icon: "🪵", scene: "普通木码头", fee: "0.01", color: "#C8956C", bg: "#FFF5EE", desc: "新手友好，随意钓" },
-  { tier: "Silver", icon: "⛵", scene: "遮阳棚码头", fee: "0.05", color: "#7A9AB8", bg: "#F0F5FA", desc: "中级玩家首选" },
-  { tier: "Gold",   icon: "🏮", scene: "彩灯栈道",   fee: "0.10", color: "#C8A020", bg: "#FFFDE7", desc: "高手竞技场" },
-  { tier: "Diamond",icon: "🏝️", scene: "湖心岛凉亭", fee: "0.50", color: "#7E6AAA", bg: "#F5F0FF", desc: "顶级挑战，赢家通吃" },
+  { tier: "Bronze", icon: "🪵", scene: "Wooden Dock", fee: "0.01", color: "#C8956C", bg: "#FFF5EE", desc: "Beginner-friendly, casual fishing" },
+  { tier: "Silver", icon: "⛵", scene: "Canopy Pier", fee: "0.05", color: "#7A9AB8", bg: "#F0F5FA", desc: "Top choice for mid-level players" },
+  { tier: "Gold",   icon: "🏮", scene: "Lantern Boardwalk", fee: "0.10", color: "#C8A020", bg: "#FFFDE7", desc: "Competitive arena for veterans" },
+  { tier: "Diamond",icon: "🏝️", scene: "Island Pavilion", fee: "0.50", color: "#7E6AAA", bg: "#F5F0FF", desc: "Ultimate challenge, winner takes all" },
 ];
 
 export default function CreateRoom() {
@@ -59,7 +59,7 @@ export default function CreateRoom() {
 
     const contract = getWriteContract();
     if (!contract) {
-      setError("钱包未连接");
+      setError("Wallet not connected");
       setLoading(false);
       return;
     }
@@ -72,9 +72,9 @@ export default function CreateRoom() {
         const eligible = rods.filter(r => r.level >= requiredLevel);
         if (eligible.length === 0) {
           if (requiredLevel <= 0) {
-            setError("需要至少一把鱼竿才能创建房间。");
+            setError("You need at least one fishing rod to create a room.");
           } else {
-            setError(`鱼竿等级不足：创建 ${selectedTier} 房间需要 Lv.${requiredLevel}+ 的鱼竿。`);
+            setError(`Rod level too low: creating a ${selectedTier} room requires a Lv.${requiredLevel}+ rod.`);
           }
           setLoading(false);
           return;
@@ -113,7 +113,7 @@ export default function CreateRoom() {
         router.push("/waiting-room");
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "创建失败";
+      const msg = e instanceof Error ? e.message : "Failed to create room";
       setError(msg);
       setLoading(false);
     }
@@ -148,7 +148,7 @@ export default function CreateRoom() {
             fontFamily: "var(--font-serif)",
             fontSize: "22px", fontWeight: 700,
             color: "var(--brown)",
-          }}>创建钓鱼房间 🏠</h1>
+          }}>Create Fishing Room 🏠</h1>
         </div>
 
         {/* 主卡片 */}
@@ -160,7 +160,7 @@ export default function CreateRoom() {
               fontSize: "13px", fontWeight: 700,
               color: "var(--brown-light)", marginBottom: "12px",
               textTransform: "uppercase", letterSpacing: "0.08em",
-            }}>选择房间等级</div>
+            }}>Select Room Tier</div>
 
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr",
@@ -207,7 +207,7 @@ export default function CreateRoom() {
               fontSize: "13px", fontWeight: 700,
               color: "var(--brown-light)", marginBottom: "12px",
               textTransform: "uppercase", letterSpacing: "0.08em",
-            }}>房间设置</div>
+            }}>Room Settings</div>
 
             {/* 公开/私人 */}
             <div style={{
@@ -218,10 +218,10 @@ export default function CreateRoom() {
             }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--brown)" }}>
-                  {isPublic ? "🌍 公开房间" : "🔒 私人房间"}
+                  {isPublic ? "🌍 Public Room" : "🔒 Private Room"}
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  {isPublic ? "所有人可见并加入" : "仅凭密码加入"}
+                  {isPublic ? "Visible and open to everyone" : "Join by password only"}
                 </div>
               </div>
               <Toggle value={isPublic} onChange={setIsPublic} />
@@ -241,7 +241,7 @@ export default function CreateRoom() {
                   }}>🔑</span>
                   <input
                     type="password"
-                    placeholder="设置房间密码"
+                    placeholder="Set room password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     style={{
@@ -268,10 +268,10 @@ export default function CreateRoom() {
             }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--brown)" }}>
-                  📺 开放直播
+                  📺 Enable Livestream
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--brown-light)", marginTop: "2px" }}>
-                  观众可实时观看并下注预测
+                  Spectators can watch live and place prediction bets
                 </div>
               </div>
               <Toggle value={isLivestream} onChange={setIsLivestream} />
@@ -291,7 +291,7 @@ export default function CreateRoom() {
               alignItems: "center", marginBottom: "8px",
             }}>
               <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--brown-light)" }}>
-                入场费
+                Entry Fee
               </span>
               <span style={{ fontSize: "22px", fontWeight: 900, color: "var(--brown)" }}>
                 {selected.fee} ETH
@@ -302,7 +302,7 @@ export default function CreateRoom() {
               alignItems: "center",
             }}>
               <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--brown-light)" }}>
-                满员奖池（预估）
+                Full Prize Pool (Est.)
               </span>
               <span style={{ fontSize: "16px", fontWeight: 800, color: selected.color }}>
                 {(parseFloat(selected.fee) * 4 * 0.95).toFixed(3)} ETH
@@ -312,7 +312,7 @@ export default function CreateRoom() {
               fontSize: "10px", color: "var(--brown-light)",
               marginTop: "8px", lineHeight: 1.5,
             }}>
-              * 平台收取 5% 手续费，奖池实发 95%
+              * Platform takes a 5% fee; 95% of the prize pool is paid out
             </div>
           </div>
 
@@ -351,9 +351,9 @@ export default function CreateRoom() {
                   display: "inline-block",
                   animation: "spin 1s linear infinite",
                 }}>🐠</span>
-                等待链上确认...
+                Waiting for on-chain confirmation...
               </>
-            ) : "出发钓鱼！🎣"}
+            ) : "Let's Go Fishing! 🎣"}
           </button>
         </div>
       </div>
